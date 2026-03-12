@@ -1,0 +1,162 @@
+/**
+ * Unified Authentication Middleware
+ * Supports both Firebase ID tokens and JWT tokens
+ * Extracts user from database and attaches to request
+ */
+
+const jwt = require('jsonwebtoken');
+const config = require('../config/config');
+const User = require('../models/User');
+const logger = require('../utils/logger');
+
+/**
+ * Main authentication middleware
+ * Accepts either Firebase ID token or JWT token
+ */
+const authenticate = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required. No token provided.'
+      });
+    }
+    
+    const token = authHeader.split(' ')[1];
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: 'Token is required.'
+      });
+    }
+
+    let user = null;
+    let authMethod = 'jwt';
+
+    try {
+        const decoded = jwt.verify(token, config.jwt.secret);
+        
+        user = await User.findById(decoded.userId);
+        
+        if (!user) {
+          return res.status(401).json({
+            success: false,
+            error: 'Invalid token. User not found.'
+          });
+        }
+        
+      } catch (jwtError) {
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid or expired token. Please login again.'
+        });
+      }
+
+    // Check if user is active
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        error: 'Account is deactivated. Please contact support.'
+      });
+    }
+
+    // Check and sync subscription status
+    await user.syncSubscriptionStatus();
+    
+    // Reload user after potential plan change
+    if (user.isModified && user.isModified('plan')) {
+      await user.reload();
+    }
+
+    // Check and update daily usage
+    user.checkDailyLimit();
+
+    // Attach user to request
+    req.user = user;
+    req.userId = user._id;
+    req.authMethod = authMethod;
+
+    next();
+    
+  } catch (error) {
+    logger.error('Authentication Middleware Error', { 
+      error: error.message, 
+      stack: error.stack 
+    });
+    
+    return res.status(500).json({
+      success: false,
+      error: 'Authentication error. Please try again.'
+    });
+  }
+};
+
+/**
+ * Require premium subscription
+ * Use after authenticate middleware
+ */
+const requirePremium = (req, res, next) => {
+  const user = req.user;
+  
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication required.'
+    });
+  }
+
+  const premiumPlans = ['pro', 'ultra', 'enterprise'];
+  
+  if (!premiumPlans.includes(user.plan)) {
+    return res.status(403).json({
+      success: false,
+      error: 'Premium subscription required.',
+      code: 'PREMIUM_REQUIRED',
+      currentPlan: user.plan
+    });
+  }
+
+  next();
+};
+
+/**
+ * Check daily usage limit
+ * Use after authenticate middleware
+ */
+const checkUsageLimit = async (req, res, next) => {
+  const user = req.user;
+  
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication required.'
+    });
+  }
+
+  const usage = user.checkDailyLimit();
+  
+  if (usage.exceeded) {
+    return res.status(429).json({
+      success: false,
+      error: 'Daily usage limit exceeded.',
+      code: 'DAILY_LIMIT_EXCEEDED',
+      used: usage.used,
+      limit: usage.limit,
+      remaining: usage.remaining
+    });
+  }
+
+  // Attach usage info to request
+  req.usage = usage;
+  
+  next();
+};
+
+module.exports = {
+  authenticate,
+  requirePremium,
+  checkUsageLimit
+};
