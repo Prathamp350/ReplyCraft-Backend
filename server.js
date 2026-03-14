@@ -182,8 +182,8 @@ const startServer = async () => {
     await syncAllSubscriptions();
     
     const PORT = config.port;
-    app.listen(PORT, () => {
-      logger.info(`ReplyCraft AI Backend running on port ${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+      logger.info(`ReplyCraft AI Backend running on port ${PORT} bound to 0.0.0.0`);
       logger.info('Available endpoints: POST /api/auth/register, POST /api/auth/login, POST /api/reply/generate-reply, POST /api/reviews/process, GET /health');
     });
   } catch (error) {
