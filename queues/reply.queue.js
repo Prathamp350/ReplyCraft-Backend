@@ -2,8 +2,8 @@ const { Queue } = require('bullmq');
 const IORedis = require('ioredis');
 const logger = require('../utils/logger');
 
-// Create Redis connection options using IORedis directly
-const connection = new IORedis({
+// Create Redis connection options unified for Localhost & Upstash
+const redisConfig = {
   host: process.env.REDIS_HOST || '127.0.0.1',
   port: parseInt(process.env.REDIS_PORT) || 6379,
   maxRetriesPerRequest: null,
@@ -13,7 +13,19 @@ const connection = new IORedis({
     const delay = Math.min(times * 50, 2000);
     return delay; // Reconnect continuously
   }
-});
+};
+
+if (process.env.REDIS_PASSWORD) {
+  redisConfig.password = process.env.REDIS_PASSWORD;
+}
+
+if (process.env.NODE_ENV === 'production' || process.env.REDIS_TLS === 'true') {
+  redisConfig.tls = {};
+}
+
+const connection = process.env.REDIS_URL
+  ? new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: null })
+  : new IORedis(redisConfig);
 
 connection.on('error', (err) => {
   logger.error('Redis connection error in reply queue', { error: err.message });
