@@ -10,17 +10,19 @@ try {
   // Only load Bull Board if not in production
   if (process.env.NODE_ENV !== 'production') {
     const { createBullBoard } = require('@bull-board/api');
+    const { BullMQAdapter } = require('@bull-board/api/bullMQAdapter');
     const { ExpressAdapter } = require('@bull-board/express');
     const { replyQueue } = require('../queues/reply.queue');
 
-    // Create Bull adapters for each queue
-    const adapters = [
-      new ExpressAdapter().setQueues(replyQueue)
-    ];
+    const serverAdapter = new ExpressAdapter();
+    serverAdapter.setBasePath('/admin/queues');
 
-    // Create Bull Board instance
-    const { router } = createBullBoard(adapters);
-    bullBoardRouter = router;
+    createBullBoard({
+      queues: [new BullMQAdapter(replyQueue)],
+      serverAdapter: serverAdapter,
+    });
+
+    bullBoardRouter = serverAdapter.getRouter();
     
     console.log('✅ Bull Board queue monitoring enabled at /admin/queues');
   }
