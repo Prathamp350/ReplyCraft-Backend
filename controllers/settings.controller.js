@@ -27,8 +27,8 @@ const getSettings = async (req, res) => {
       replyMode: profile?.replyMode || 'manual',
       replyDelay: profile?.replyDelayMinutes ? `${profile.replyDelayMinutes}m` : '0m',
       autoReply: profile?.replyMode === 'auto',
-      emailNotifications: true,
-      negativeAlerts: true
+      emailNotifications: user?.notifications?.email ?? true,
+      negativeAlerts: user?.notifications?.negativeAlerts ?? true
     });
 
   } catch (error) {
@@ -95,12 +95,11 @@ const updateSettings = async (req, res) => {
  */
 const getNotifications = async (req, res) => {
   try {
-    // For now, return defaults
-    // In a real app, store in user profile
+    const user = await User.findById(req.userId);
     return res.status(200).json({
       success: true,
-      emailNotifications: true,
-      negativeAlerts: true
+      emailNotifications: user?.notifications?.email ?? true,
+      negativeAlerts: user?.notifications?.negativeAlerts ?? true
     });
 
   } catch (error) {
@@ -119,7 +118,17 @@ const updateNotifications = async (req, res) => {
   try {
     const { emailNotifications, negativeAlerts } = req.body;
 
-    // In a real app, save to user profile
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    user.notifications = {
+      email: emailNotifications !== undefined ? emailNotifications : true,
+      negativeAlerts: negativeAlerts !== undefined ? negativeAlerts : true
+    };
+    await user.save();
+
     logger.info('Notification preferences updated', { 
       userId: req.userId,
       emailNotifications,

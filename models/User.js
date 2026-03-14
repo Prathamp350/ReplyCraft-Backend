@@ -123,6 +123,10 @@ const userSchema = new mongoose.Schema({
   isOnboarded: {
     type: Boolean,
     default: false
+  },
+  notifications: {
+    email: { type: Boolean, default: true },
+    negativeAlerts: { type: Boolean, default: true }
   }
 }, {
   timestamps: true

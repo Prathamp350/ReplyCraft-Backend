@@ -54,6 +54,9 @@ validateEmailConfig();
 
 const app = express();
 
+// Trust the reverse proxy (required for Railway load balancer & express-rate-limit)
+app.set('trust proxy', 1);
+
 // Suppress Mongoose duplicate index warning
 // Note: suppressNoSchemaWarning is not a valid option, so we just remove the call.
 
