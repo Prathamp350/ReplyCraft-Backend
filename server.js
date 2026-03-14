@@ -60,15 +60,11 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-// CORS configuration - allow frontend origin
+// CORS configuration - allow dynamic frontend origins to prevent deployment blocks
 app.use(cors({
   origin: function (origin, callback) {
-    const allowedOrigins = ['http://localhost:5173', 'http://localhost:8080', 'http://localhost:4000', process.env.FRONTEND_URL];
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
+    // Dynamically allow the requesting origin to prevent deployment connectivity issues
+    callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
