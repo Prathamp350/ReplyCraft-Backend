@@ -8,30 +8,10 @@ const IORedis = require('ioredis');
 const config = require('../config/config');
 const logger = require('../utils/logger');
 
-// Create Redis connection options unified for Localhost & Upstash
-const redisConfig = {
-  host: process.env.REDIS_HOST || '127.0.0.1',
-  port: parseInt(process.env.REDIS_PORT) || 6379,
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-  keepAlive: 10000,
-  retryStrategy(times) {
-    const delay = Math.min(times * 50, 2000);
-    return delay; // Reconnect continuously
-  }
-};
+const createRedisConnection = require('../config/redis');
 
-if (process.env.REDIS_PASSWORD) {
-  redisConfig.password = process.env.REDIS_PASSWORD;
-}
-
-if (process.env.NODE_ENV === 'production' || process.env.REDIS_TLS === 'true') {
-  redisConfig.tls = {};
-}
-
-const connection = process.env.REDIS_URL 
-  ? new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: null })
-  : new IORedis(redisConfig);
+// Get the cleaned, standardized Redis connection
+const connection = createRedisConnection();
 
 connection.on('error', (err) => {
   logger.error('Redis connection error in email queue', { error: err.message });

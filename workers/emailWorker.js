@@ -11,18 +11,10 @@ const path = require('path');
 const logger = require('../utils/logger');
 const config = require('../config/config');
 
-// Create Redis connection options using IORedis directly
-const connection = new IORedis({
-  host: process.env.REDIS_HOST || '127.0.0.1',
-  port: parseInt(process.env.REDIS_PORT) || 6379,
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-  keepAlive: 10000,
-  retryStrategy(times) {
-    const delay = Math.min(times * 50, 2000);
-    return delay; // Reconnect continuously
-  }
-});
+const createRedisConnection = require('../config/redis');
+
+// Get the cleaned, standardized Redis connection
+const connection = createRedisConnection();
 
 connection.on('error', (err) => {
   logger.error('Redis connection error in email worker', { error: err.message });
