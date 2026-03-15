@@ -23,7 +23,7 @@ class TripAdvisorAdapter extends BaseAdapter {
   async connect(connection) {
     try {
       // Validate API key exists
-      return !!connection.apiKey;
+      return !!(connection.apiKey || process.env.TRIPADVISOR_API_KEY);
     } catch (error) {
       console.error('TripAdvisor connection error:', error.message);
       return false;
@@ -36,12 +36,13 @@ class TripAdvisorAdapter extends BaseAdapter {
   async fetchReviews(connection) {
     try {
       const locationId = connection.locationId; // TripAdvisor location ID
+      const apiKey = connection.apiKey || process.env.TRIPADVISOR_API_KEY;
 
       const response = await axios.get(
         `${this.baseUrl}/location/${locationId}/reviews`,
         {
           headers: {
-            'Authorization': `Bearer ${connection.apiKey}`
+            'Authorization': `Bearer ${apiKey}`
           },
           params: {
             language: 'en',
@@ -58,12 +59,45 @@ class TripAdvisorAdapter extends BaseAdapter {
   }
 
   /**
+   * Search for a location to auto-connect
+   */
+  async searchBusiness(name, location) {
+    try {
+      const apiKey = process.env.TRIPADVISOR_API_KEY;
+      if (!apiKey) {
+        console.warn('TRIPADVISOR_API_KEY is not configured in environment');
+        return null;
+      }
+      
+      const response = await axios.get(
+        `${this.baseUrl}/location/search`,
+        {
+          params: { key: apiKey, searchQuery: `${name} ${location || ''}`.trim(), language: 'en' }
+        }
+      );
+      
+      const place = response.data.data?.[0];
+      if (!place) return null;
+      
+      return {
+        locationId: place.location_id,
+        locationName: place.name,
+        rawData: place
+      };
+    } catch (error) {
+      console.error('TripAdvisor search error:', error.message);
+      return null;
+    }
+  }
+
+  /**
    * Post reply to a TripAdvisor review
    * Note: TripAdvisor API has limited support for replies
    */
   async postReply(connection, reviewId, replyText) {
     try {
       const locationId = connection.locationId;
+      const apiKey = connection.apiKey || process.env.TRIPADVISOR_API_KEY;
 
       const response = await axios.post(
         `${this.baseUrl}/location/${locationId}/review/${reviewId}/reply`,
@@ -73,7 +107,7 @@ class TripAdvisorAdapter extends BaseAdapter {
         },
         {
           headers: {
-            'Authorization': `Bearer ${connection.apiKey}`,
+            'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json'
           }
         }

@@ -4,9 +4,20 @@
  */
 
 const BusinessConnection = require('../models/BusinessConnection');
+const User = require('../models/User');
+const Review = require('../models/Review');
+const platformManager = require('../integrations/platformManager');
 const axios = require('axios');
 const config = require('../config/config');
 const logger = require('../utils/logger');
+
+const AVAILABLE_PLATFORMS = [
+  { id: 'google', platform: 'google', name: 'Google Business Profile', description: 'Connect your Google Business Profile to map real-time customer reviews.', logo: '/platforms/google.svg', category: 'reviews' },
+  { id: 'yelp', platform: 'yelp', name: 'Yelp', description: 'Sync Yelp local reviews automatically and track restaurant ratings.', logo: '/platforms/yelp.svg', category: 'reviews' },
+  { id: 'tripadvisor', platform: 'tripadvisor', name: 'TripAdvisor', description: 'Bring in your hotel or attraction reviews directly from TripAdvisor.', logo: '/platforms/tripadvisor.svg', category: 'reviews' },
+  { id: 'appstore', platform: 'appstore', name: 'Apple App Store', description: 'Monitor iOS app reviews directly from the App Store.', logo: '/platforms/appstore.svg', category: 'app_store' },
+  { id: 'playstore', platform: 'playstore', name: 'Google Play Store', description: 'Track Android app ratings and feedback globally.', logo: '/platforms/playstore.svg', category: 'app_store' }
+];
 
 /**
  * Connect Google Business Profile
@@ -130,22 +141,33 @@ const listIntegrations = async (req, res) => {
     const connections = await BusinessConnection.find({
       userId: req.userId,
       isActive: true
-    }).sort({ createdAt: -1 });
+    });
 
-    const integrations = connections.map(conn => ({
-      id: conn._id,
-      platform: conn.platform,
-      locationName: conn.locationName,
-      locationId: conn.locationId,
-      connectedAt: conn.createdAt,
-      status: conn.isActive ? 'active' : 'expired'
+    const populatedIntegrations = await Promise.all(AVAILABLE_PLATFORMS.map(async (plat) => {
+      const conn = connections.find(c => c.platform === plat.platform);
+      
+      let reviewCount = 0;
+      let lastSyncAt = null;
+
+      if (conn) {
+        reviewCount = await Review.countDocuments({ connectionId: conn._id });
+        lastSyncAt = conn.updatedAt;
+      }
+
+      return {
+        ...plat,
+        id: plat.platform, // ID must match the platform name for frontend toggling
+        connected: !!conn,
+        reviewCount,
+        lastSyncAt,
+        status: conn ? 'active' : 'idle'
+      };
     }));
 
     return res.status(200).json({
       success: true,
-      integrations
+      integrations: populatedIntegrations
     });
-
   } catch (error) {
     logger.error('List integrations error', {
       error: error.message,
@@ -156,6 +178,142 @@ const listIntegrations = async (req, res) => {
       success: false,
       error: 'Failed to list integrations'
     });
+  }
+};
+
+/**
+ * Toggle an integration connection
+ */
+const toggleIntegration = async (req, res) => {
+  try {
+    const { id } = req.params; // Using the platform name as the ID
+    const { connect, businessEmail } = req.body;
+    const userId = req.userId;
+
+    let connection = await BusinessConnection.findOne({ userId, platform: id });
+
+    // Disconnect Flow
+    if (!connect) {
+      if (connection) {
+        connection.isActive = false;
+        await connection.save();
+      }
+      return res.status(200).json({ success: true, message: 'Disconnected successfully' });
+    }
+
+    // Connect Flow
+    if (connection && connection.isActive) {
+      return res.status(200).json({ success: true, connection });
+    }
+
+    if (connection && !connection.isActive) {
+      connection.isActive = true;
+      if (businessEmail) {
+        connection.config = { ...connection.config, businessEmail };
+      }
+      await connection.save();
+      return res.status(200).json({ success: true, connection });
+    }
+
+    // New Connection: Attempt auto-discovery
+    const user = await User.findById(userId);
+    const searchTerm = user.businessName || user.name || 'Business';
+    const searchLocation = user.city || user.country || '';
+
+    const adapter = platformManager.getAdapter(id);
+    if (!adapter || typeof adapter.searchBusiness !== 'function') {
+      return res.status(400).json({ success: false, error: 'Platform does not support auto-discovery' });
+    }
+
+    const businessMatch = await adapter.searchBusiness(searchTerm, searchLocation);
+
+    if (!businessMatch) {
+      return res.status(404).json({ success: false, error: 'Could not automatically locate your business on this platform' });
+    }
+
+    // Auto-connect
+    connection = new BusinessConnection({
+      userId,
+      platform: id,
+      locationId: businessMatch.locationId,
+      locationName: businessMatch.locationName,
+      isActive: true,
+      config: businessEmail ? { businessEmail } : {}
+    });
+    
+    await connection.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `${businessMatch.locationName} connected successfully!`
+    });
+
+  } catch (error) {
+    logger.error('Toggle integration error', { error: error.message, userId: req.userId });
+    return res.status(500).json({ success: false, error: 'Failed to toggle integration' });
+  }
+};
+
+/**
+ * Manually force a sync job immediately
+ */
+const syncIntegration = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.userId;
+
+    const connection = await BusinessConnection.findOne({ userId, platform: id, isActive: true });
+    
+    if (!connection) {
+      return res.status(404).json({ success: false, error: 'Connection not active' });
+    }
+
+    const adapter = platformManager.getAdapter(id);
+    const rawReviews = await adapter.fetchReviews(connection);
+    
+    let newCount = 0;
+    
+    // Save to Database
+    for (const raw of rawReviews) {
+      const normalized = adapter.transformReview(raw);
+      if (!normalized.platformReviewId) continue;
+      
+      const exists = await Review.findOne({ platform: id, platformReviewId: normalized.platformReviewId });
+      if (!exists) {
+        const nr = new Review({
+          reviewId: `${id}_${normalized.platformReviewId}`,
+          platform: id,
+          platformReviewId: normalized.platformReviewId,
+          platformLocationId: normalized.platformLocationId,
+          externalReviewId: normalized.platformReviewId,
+          userId,
+          connectionId: connection._id,
+          reviewText: normalized.text,
+          rating: normalized.rating,
+          author: normalized.author,
+          authorPhotoUrl: normalized.authorPhotoUrl,
+          replyStatus: 'pending',
+          fetchedAt: new Date()
+        });
+        await nr.save();
+        newCount++;
+      }
+    }
+
+    connection.updatedAt = new Date();
+    await connection.save();
+
+    const reviewCount = await Review.countDocuments({ connectionId: connection._id });
+
+    return res.status(200).json({
+      success: true,
+      reviewCount,
+      lastSyncAt: connection.updatedAt
+    });
+
+  } catch (error) {
+    logger.error('Sync error', { error: error.message, userId: req.userId });
+    return res.status(500).json({ success: false, error: 'Failed to sync platform' });
   }
 };
 
@@ -298,5 +456,7 @@ module.exports = {
   listIntegrations,
   getIntegration,
   disconnectIntegration,
-  getValidAccessToken
+  getValidAccessToken,
+  toggleIntegration,
+  syncIntegration
 };

@@ -1,15 +1,14 @@
-const axios = require('axios');
+const store = require('app-store-scraper');
 const BaseAdapter = require('./baseAdapter');
 
 /**
  * Apple App Store adapter
- * Implements platform adapter for Apple App Store app reviews
+ * Implements platform adapter for Apple App Store app reviews using public scraping
  */
 class AppStoreAdapter extends BaseAdapter {
   constructor() {
     super();
     this.platform = 'appstore';
-    this.baseUrl = 'https://api.appstoreconnect.apple.com/v1';
   }
 
   getPlatformName() {
@@ -17,42 +16,46 @@ class AppStoreAdapter extends BaseAdapter {
   }
 
   /**
-   * Connect to Apple App Store Connect API
-   * Uses JWT authentication
+   * Connect to Apple App Store
    */
   async connect(connection) {
+    return true;
+  }
+
+  /**
+   * Search for an app to auto-connect
+   */
+  async searchBusiness(name) {
     try {
-      // Apple uses JWT tokens, you'd generate/refresh here
-      // For now, check if we have the necessary credentials
-      return !!connection.apiKey || !!connection.accessToken;
+      const results = await store.search({ term: name, num: 1 });
+      if (!results || results.length === 0) return null;
+      
+      const app = results[0];
+      return {
+        locationId: app.appId,
+        locationName: app.title,
+        rawData: app
+      };
     } catch (error) {
-      console.error('App Store connection error:', error.message);
-      return false;
+      console.error('App Store search error:', error.message);
+      return null;
     }
   }
 
   /**
-   * Fetch reviews from Apple App Store Connect API
+   * Fetch reviews from Apple App Store via Scraper
    */
   async fetchReviews(connection) {
     try {
-      const appId = connection.config?.appId || connection.locationId;
+      const appId = connection.locationId;
+      
+      const reviews = await store.reviews({
+        appId: appId,
+        sort: store.sort.RECENT,
+        page: 1
+      });
 
-      const response = await axios.get(
-        `${this.baseUrl}/apps/${appId}/customerReviews`,
-        {
-          headers: {
-            'Authorization': `Bearer ${connection.accessToken}`,
-            'Content-Type': 'application/json'
-          },
-          params: {
-            'limit': 50,
-            'sort': '-createdDate'
-          }
-        }
-      );
-
-      return response.data.data || [];
+      return reviews || [];
     } catch (error) {
       console.error('Error fetching App Store reviews:', error.message);
       throw error;
@@ -63,56 +66,23 @@ class AppStoreAdapter extends BaseAdapter {
    * Post reply to an App Store review
    */
   async postReply(connection, reviewId, replyText) {
-    try {
-      const appId = connection.config?.appId || connection.locationId;
-
-      const response = await axios.post(
-        `${this.baseUrl}/apps/${appId}/customerReviews/${reviewId}/responses`,
-        {
-          data: {
-            type: 'customerReviewResponses',
-            attributes: {
-              body: replyText
-            },
-            relationships: {
-              review: {
-                data: {
-                  id: reviewId,
-                  type: 'customerReviews'
-                }
-              }
-            }
-          }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${connection.accessToken}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      return response.data;
-    } catch (error) {
-      console.error('Error posting reply to App Store:', error.message);
-      throw error;
-    }
+    console.warn('App Store requires Apple JWT to post replies. Scraper is read-only.');
+    throw new Error('App Store does not support API-based replies via scraper');
   }
 
   /**
    * Transform App Store review to normalized format
    */
   transformReview(rawReview) {
-    const attributes = rawReview.attributes || {};
     return {
       platform: this.platform,
       platformReviewId: rawReview.id || '',
-      platformLocationId: rawReview.attributes?.app?.link?.split('/').pop() || '',
-      text: attributes.body || '',
-      rating: attributes.rating || 0,
-      author: attributes.alias || attributes.reviewerNickname || 'Anonymous',
+      platformLocationId: '',
+      text: rawReview.text || '',
+      rating: rawReview.score || 0,
+      author: rawReview.userName || 'Anonymous',
       authorPhotoUrl: null,
-      createdAt: attributes.createdDate ? new Date(attributes.createdDate) : new Date(),
+      createdAt: new Date(), // scraper doesn't provide exact date reliably
       rawData: rawReview
     };
   }

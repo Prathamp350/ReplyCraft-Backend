@@ -23,7 +23,7 @@ class YelpAdapter extends BaseAdapter {
   async connect(connection) {
     try {
       // Validate API key exists
-      return !!connection.apiKey;
+      return !!(connection.apiKey || process.env.YELP_API_KEY);
     } catch (error) {
       console.error('Yelp connection error:', error.message);
       return false;
@@ -36,12 +36,13 @@ class YelpAdapter extends BaseAdapter {
   async fetchReviews(connection) {
     try {
       const businessId = connection.locationId; // Yelp uses business ID as locationId
+      const apiKey = connection.apiKey || process.env.YELP_API_KEY;
 
       const response = await axios.get(
         `${this.baseUrl}/businesses/${businessId}/reviews`,
         {
           headers: {
-            Authorization: `Bearer ${connection.apiKey}`
+            Authorization: `Bearer ${apiKey}`
           },
           params: {
             limit: 50,
@@ -54,6 +55,44 @@ class YelpAdapter extends BaseAdapter {
     } catch (error) {
       console.error('Error fetching Yelp reviews:', error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Search for a business to auto-connect
+   * Uses YELP_API_KEY env variable
+   */
+  async searchBusiness(name, location) {
+    try {
+      const apiKey = process.env.YELP_API_KEY;
+      if (!apiKey) {
+        console.warn('YELP_API_KEY is not configured in environment');
+        return null;
+      }
+      
+      const response = await axios.get(
+        `${this.baseUrl}/businesses/search`,
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          params: { 
+            term: name, 
+            location: location || 'US', 
+            limit: 1 
+          }
+        }
+      );
+      
+      const business = response.data.businesses?.[0];
+      if (!business) return null;
+      
+      return {
+        locationId: business.id,
+        locationName: business.name,
+        rawData: business
+      };
+    } catch (error) {
+      console.error('Yelp search error:', error.message);
+      return null;
     }
   }
 

@@ -31,6 +31,8 @@ const { validateEmailConfig } = require('./config/emailValidator');
 const { handleWebhook, syncAllSubscriptions } = require('./controllers/webhook.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { bullBoardRouter } = require('./config/bullBoard');
+const cron = require('node-cron');
+const User = require('./models/User');
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads', 'avatars');
