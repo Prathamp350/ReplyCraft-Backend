@@ -3,25 +3,36 @@ const router = express.Router();
 const RestaurantProfile = require('../models/RestaurantProfile');
 const User = require('../models/User');
 const multer = require('multer');
+const { S3Client, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const multerS3 = require('multer-s3');
 const path = require('path');
 const fs = require('fs');
 const logger = require('../utils/logger');
 
-// Configure multer storage
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const dir = path.join(__dirname, '../uploads/avatars');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: function (req, file, cb) {
-    // Requirements request: userId_timestamp.jpg (or whatever ext)
-    const ext = path.extname(file.originalname) || '.jpg';
-    cb(null, `${req.userId}_${Date.now()}${ext}`);
+// Initialize S3 Client
+const s3 = new S3Client({
+  region: process.env.AWS_REGION || 'eu-north-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   }
 });
-const upload = multer({ 
-  storage: storage,
+
+// Configure multer-s3 storage
+const upload = multer({
+  storage: multerS3({
+    s3: s3,
+    bucket: process.env.AWS_S3_BUCKET_NAME || 'replycraft-profile-images',
+    contentType: multerS3.AUTO_CONTENT_TYPE,
+    metadata: function (req, file, cb) {
+      cb(null, { fieldName: file.fieldname });
+    },
+    key: function (req, file, cb) {
+      // Save it inside the requested "profile-images" folder
+      const ext = path.extname(file.originalname) || '.jpg';
+      cb(null, `profile-images/${req.userId}_${Date.now()}${ext}`);
+    }
+  }),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) cb(null, true);
@@ -217,7 +228,7 @@ const deleteProfile = async (req, res) => {
 };
 
 /**
- * Upload User Avatar
+ * Upload User Avatar to S3
  */
 const uploadAvatar = async (req, res) => {
   try {
@@ -230,39 +241,40 @@ const uploadAvatar = async (req, res) => {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
-    // Delete old avatar file if it exists
-    if (user.avatarUrl) {
+    // Delete old avatar from S3 if it exists
+    if (user.avatarUrl && user.avatarUrl.includes('.amazonaws.com')) {
       try {
-        // extract filename from URL (e.g., /uploads/avatars/123.jpg => 123.jpg)
-        const oldFilename = user.avatarUrl.split('/').pop();
-        if (oldFilename) {
-          const oldPath = path.join(__dirname, '../uploads/avatars', oldFilename);
-          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-        }
+        // Extract the original S3 Key from the URL
+        const urlObj = new URL(user.avatarUrl);
+        // pathname starts with '/', e.g. "/profile-images/xyz.jpg"
+        const objectKey = urlObj.pathname.startsWith('/') ? urlObj.pathname.slice(1) : urlObj.pathname;
+        
+        await s3.send(new DeleteObjectCommand({
+          Bucket: process.env.AWS_S3_BUCKET_NAME || 'replycraft-profile-images',
+          Key: objectKey,
+        }));
+        logger.info('Deleted old avatar from S3', { key: objectKey });
       } catch (e) {
-        console.error('Failed to delete old avatar:', e);
+        logger.error('Failed to delete old avatar from S3', { error: e.message });
       }
     }
 
-    // Save new avatar URL
-    const newAvatarUrl = `/uploads/avatars/${req.file.filename}`;
+    // Save new permanent S3 URL provided by multer-s3
+    const newAvatarUrl = req.file.location;
     user.avatarUrl = newAvatarUrl;
     await user.save();
 
-    logger.info('Avatar uploaded', { userId: req.userId, avatarUrl: newAvatarUrl });
+    logger.info('Avatar uploaded to S3', { userId: req.userId, avatarUrl: newAvatarUrl });
 
-    // Return full URL that frontend can use
-    const baseUrl = process.env.FRONTEND_URL?.replace('/api', '') || 'http://localhost:3000';
-    
     return res.status(200).json({
       success: true,
       message: 'Avatar uploaded successfully',
-      avatarUrl: newAvatarUrl,
-      fullAvatarUrl: `${baseUrl}${newAvatarUrl}`
+      avatarUrl: newAvatarUrl, // It's an absolute URL directly from S3 now
+      fullAvatarUrl: newAvatarUrl 
     });
 
   } catch (error) {
-    console.error('Upload Avatar Error:', error);
+    logger.error('Upload Avatar Error', { error: error.message });
     return res.status(500).json({
       success: false,
       error: error.message || 'Failed to upload avatar'
@@ -297,6 +309,50 @@ const completeOnboarding = async (req, res) => {
   }
 };
 
+/**
+ * Delete User Avatar from S3
+ */
+const deleteAvatar = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    if (user.avatarUrl && user.avatarUrl.includes('.amazonaws.com')) {
+      try {
+        // Extract the original S3 Key from the URL
+        const urlObj = new URL(user.avatarUrl);
+        const objectKey = urlObj.pathname.startsWith('/') ? urlObj.pathname.slice(1) : urlObj.pathname;
+
+        await s3.send(new DeleteObjectCommand({
+          Bucket: process.env.AWS_S3_BUCKET_NAME || 'replycraft-profile-images',
+          Key: objectKey,
+        }));
+        logger.info('Deleted avatar manually from S3', { key: objectKey });
+      } catch (e) {
+        logger.error('Failed to delete avatar from S3', { error: e.message });
+      }
+      
+      // Remove URL from database
+      user.avatarUrl = null;
+      await user.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Avatar removed successfully'
+    });
+
+  } catch (error) {
+    logger.error('Delete Avatar Error', { error: error.message });
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to delete avatar'
+    });
+  }
+};
+
 // Apply auth middleware to all routes
 const { authenticate } = require('../middleware/auth.middleware');
 router.use(authenticate);
@@ -306,6 +362,7 @@ router.get('/', getProfile);
 router.post('/', saveProfile);
 router.delete('/', deleteProfile);
 router.post('/avatar', upload.single('avatar'), uploadAvatar);
+router.delete('/avatar', deleteAvatar);
 router.post('/complete-onboarding', completeOnboarding);
 
 module.exports = router;
