@@ -16424,3 +16424,187 @@
 {"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:29"}
 {"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:29"}
 {"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:29"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:31"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:31"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:31"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:31"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:31"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:31"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:31"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:31"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:33"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:33"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:33"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:33"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:33"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:33"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:33"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:33"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:35"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:35"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:35"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:35"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:35"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:35"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:35"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:35"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:37"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:37"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:38"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:38"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:38"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:38"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:38"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:38"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:40"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:40"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:40"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:40"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:40"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:40"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:40"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:40"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:42"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:42"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:42"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:43"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:43"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:43"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:43"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:43"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:45"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:45"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:45"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:45"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:45"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:45"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:46"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:46"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:48"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:48"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:48"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:48"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:48"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:48"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:48"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:48"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:50"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:50"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:50"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:50"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:50"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:50"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:50"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:50"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:52"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:52"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:52"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:53"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:53"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:53"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:53"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:53"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:55"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:55"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:55"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:55"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:55"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:55"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:55"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:55"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:57"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:57"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:57"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:57"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:57"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:57"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:57"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:57"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:23:59"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:59"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:59"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:23:59"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:23:59"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:23:59"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:23:59"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:23:59"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:01"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:01"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:01"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:01"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:01"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:02"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:02"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:02"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:04"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:04"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:04"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:04"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:04"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:04"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:04"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:04"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:06"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:06"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:06"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:06"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:06"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:06"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:06"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:06"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:08"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:08"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:08"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:08"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:08"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:08"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:08"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:08"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:10"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:10"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:10"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:10"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:10"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:10"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:10"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:10"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:12"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:12"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:12"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:12"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:12"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:12"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:12"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:12"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:14"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:14"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:14"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:14"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:14"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:14"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:14"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:14"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:16"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:17"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:17"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:17"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:17"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:17"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:17"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:17"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:19"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:19"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:19"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:19"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:19"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:19"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:19"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:19"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in reply queue","timestamp":"2026-03-17 21:24:21"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:21"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:21"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email queue","timestamp":"2026-03-17 21:24:21"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in email worker","timestamp":"2026-03-17 21:24:21"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Email worker error","timestamp":"2026-03-17 21:24:21"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Redis connection error in AI worker","timestamp":"2026-03-17 21:24:21"}
+{"error":"connect ECONNREFUSED 127.0.0.1:6379","level":"error","message":"Worker error","stack":"Error: connect ECONNREFUSED 127.0.0.1:6379\n    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)","timestamp":"2026-03-17 21:24:21"}
