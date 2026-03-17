@@ -155,8 +155,25 @@ const checkUsageLimit = async (req, res, next) => {
   next();
 };
 
+/**
+ * Authorize specific roles
+ * Use after authenticate middleware
+ */
+const authorizeRoles = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: `Access denied. Requires one of these roles: ${roles.join(', ')}`
+      });
+    }
+    next();
+  };
+};
+
 module.exports = {
   authenticate,
   requirePremium,
-  checkUsageLimit
+  checkUsageLimit,
+  authorizeRoles
 };

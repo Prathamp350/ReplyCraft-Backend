@@ -243,6 +243,15 @@ const login = async (req, res) => {
       });
     }
 
+    // Check if account is locked
+    if (user.lockUntil && user.lockUntil > new Date()) {
+      return res.status(403).json({
+        success: false,
+        error: 'Account locked due to too many failed attempts. Please reset your password.',
+        requires_reset: true
+      });
+    }
+
     // Check if user is active
     if (!user.isActive) {
       logger.logAuth('Login failed - account deactivated', { userId: user._id });
@@ -264,11 +273,36 @@ const login = async (req, res) => {
     const isMatch = await user.comparePassword(password);
     
     if (!isMatch) {
+      user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+      
+      if (user.failedLoginAttempts >= 3) {
+        // Lock until midnight of next day
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+        user.lockUntil = tomorrow;
+        await user.save();
+        
+        logger.logAuth('Account locked (3 failed attempts)', { userId: user._id });
+        return res.status(403).json({
+          success: false,
+          error: 'Account locked due to too many failed attempts. Please reset your password.',
+          requires_reset: true
+        });
+      }
+      
+      await user.save();
       logger.logAuth('Login failed - invalid password', { userId: user._id });
       return res.status(401).json({
         success: false,
-        error: 'Invalid email or password'
+        error: `Invalid email or password. ${3 - user.failedLoginAttempts} attempts remaining.`
       });
+    }
+
+    // Success - reset attempts
+    if (user.failedLoginAttempts > 0 || user.lockUntil) {
+      user.failedLoginAttempts = 0;
+      user.lockUntil = null;
     }
 
     // Generate new OTP
@@ -460,11 +494,81 @@ const getCurrentUser = async (req, res) => {
   }
 };
 
+/**
+ * Forgot Password - Send OTP
+ */
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email is required' });
+    }
+    
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(200).json({ success: true, message: 'If the email exists, an OTP will be sent.' });
+    }
+
+    const otp = generateOtp();
+    user.otp = otp;
+    user.otpExpiresAt = new Date(Date.now() + 5 * 60000);
+    await user.save();
+
+    queueOtpEmail(user.email, user.name, otp).catch(err => {
+      logger.error('Failed to queue OTP email for forgot password', { error: err.message });
+    });
+
+    return res.status(200).json({ success: true, message: 'OTP sent' });
+  } catch (error) {
+    logger.error('Forgot Password Error', { error: error.message, stack: error.stack });
+    return res.status(500).json({ success: false, error: 'Failed to process request' });
+  }
+};
+
+/**
+ * Reset Password
+ */
+const resetPassword = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({ success: false, error: 'Email, OTP, and new password are required' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) {
+      return res.status(400).json({ success: false, error: 'Invalid operation' });
+    }
+
+    if (user.otp !== otp || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
+      return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
+    }
+
+    // Reset password and clear locks
+    user.password = newPassword;
+    user.otp = null;
+    user.otpExpiresAt = null;
+    user.failedLoginAttempts = 0;
+    user.lockUntil = null;
+    await user.save();
+
+    logger.logAuth('Password reset successfully', { userId: user._id });
+
+    return res.status(200).json({ success: true, message: 'Password reset successfully' });
+  } catch (error) {
+    logger.error('Reset Password Error', { error: error.message, stack: error.stack });
+    return res.status(500).json({ success: false, error: 'Failed to reset password' });
+  }
+};
+
 module.exports = {
   googleLogin,
   register,
   login,
   verifyOtp,
   resendOtp,
-  getCurrentUser
+  getCurrentUser,
+  forgotPassword,
+  resetPassword
 };

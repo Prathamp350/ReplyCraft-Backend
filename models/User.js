@@ -127,6 +127,19 @@ const userSchema = new mongoose.Schema({
   notifications: {
     email: { type: Boolean, default: true },
     negativeAlerts: { type: Boolean, default: true }
+  },
+  role: {
+    type: String,
+    enum: ['user', 'support', 'finance', 'admin', 'superadmin'],
+    default: 'user'
+  },
+  failedLoginAttempts: {
+    type: Number,
+    default: 0
+  },
+  lockUntil: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
