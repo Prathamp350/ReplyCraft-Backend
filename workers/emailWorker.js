@@ -158,6 +158,10 @@ async function processEmailJob(job) {
         templateName = 'otpEmail';
       }
       break;
+    case 'ticketConfirmation':
+      subject = `Support Ticket ${data.ticketId || ''} Created ✅`;
+      templateName = 'ticketConfirmation';
+      break;
     default:
       subject = 'ReplyCraft Notification';
       templateName = 'welcomeEmail';

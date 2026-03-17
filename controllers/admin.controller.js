@@ -3,7 +3,9 @@ const logger = require('../utils/logger');
 const config = require('../config/config');
 
 /**
- * Superadmin: Create a new staff account (admin, finance, support)
+ * Create a new staff account
+ * Superadmin can create: admin, finance, support, superadmin
+ * Admin can create: finance, support
  */
 const createStaff = async (req, res) => {
   try {
@@ -24,6 +26,14 @@ const createStaff = async (req, res) => {
       });
     }
 
+    // Hierarchy enforcement: admin can only create finance and support
+    if (req.user.role === 'admin' && ['admin', 'superadmin'].includes(role)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Admins can only create finance and support accounts'
+      });
+    }
+
     let user = await User.findOne({ email: email.toLowerCase() });
     if (user) {
       return res.status(400).json({
@@ -38,7 +48,8 @@ const createStaff = async (req, res) => {
       password,
       role: role,
       plan: config.defaultPlan,
-      isEmailVerified: true // Auto-verify internally created staff accounts
+      isEmailVerified: true,
+      isOnboarded: true
     });
 
     await user.save();
@@ -64,6 +75,70 @@ const createStaff = async (req, res) => {
   }
 };
 
+/**
+ * List staff accounts
+ * Superadmin sees all staff. Admin sees finance + support only.
+ */
+const listStaff = async (req, res) => {
+  try {
+    let roleFilter;
+    if (req.user.role === 'superadmin') {
+      roleFilter = ['support', 'finance', 'admin', 'superadmin'];
+    } else {
+      roleFilter = ['support', 'finance'];
+    }
+
+    const staff = await User.find({
+      role: { $in: roleFilter }
+    }).select('name email role isActive createdAt avatarUrl').sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      staff
+    });
+  } catch (error) {
+    logger.error('List Staff Error', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to list staff' });
+  }
+};
+
+/**
+ * Deactivate a staff account
+ */
+const deleteStaff = async (req, res) => {
+  try {
+    const staffUser = await User.findById(req.params.id);
+    if (!staffUser) {
+      return res.status(404).json({ success: false, error: 'Staff member not found' });
+    }
+
+    // Cannot deactivate yourself
+    if (staffUser._id.toString() === req.user._id.toString()) {
+      return res.status(400).json({ success: false, error: 'Cannot deactivate your own account' });
+    }
+
+    // Admin cannot deactivate admin or superadmin
+    if (req.user.role === 'admin' && ['admin', 'superadmin'].includes(staffUser.role)) {
+      return res.status(403).json({ success: false, error: 'Insufficient permissions' });
+    }
+
+    staffUser.isActive = false;
+    await staffUser.save();
+
+    logger.logAuth(`Staff account deactivated by ${req.user.email}`, { staffId: staffUser._id, role: staffUser.role });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Staff account deactivated'
+    });
+  } catch (error) {
+    logger.error('Delete Staff Error', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to deactivate staff' });
+  }
+};
+
 module.exports = {
-  createStaff
+  createStaff,
+  listStaff,
+  deleteStaff
 };

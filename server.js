@@ -22,6 +22,7 @@ const settingsRoutes = require('./routes/settings.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const contactRoutes = require('./routes/contact.routes');
 const adminRoutes = require('./routes/admin.routes');
+const ticketRoutes = require('./routes/ticket.routes');
 const path = require('path');
 const fs = require('fs');
 const logger = require('./utils/logger');
@@ -115,6 +116,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/tickets', ticketRoutes);
 
 // Bull Board - Queue Monitoring UI (only in development)
 if (process.env.NODE_ENV !== 'production' && bullBoardRouter) {

@@ -478,6 +478,7 @@ const getCurrentUser = async (req, res) => {
         city: user.city,
         country: user.country,
         dob: user.dob,
+        role: user.role,
         isOnboarded: user.isOnboarded,
         stripeCustomerId: user.stripeCustomerId,
         subscriptionStatus: user.subscriptionStatus,
