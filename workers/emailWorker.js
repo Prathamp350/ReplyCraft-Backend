@@ -150,8 +150,13 @@ async function processEmailJob(job) {
       templateName = 'welcomeEmail'; // Reuse welcome template for test
       break;
     case 'otp':
-      subject = 'Your ReplyCraft Verification Code 🔒';
-      templateName = 'otpEmail';
+      if (data.reason === 'reset') {
+        subject = 'Reset Your ReplyCraft Password 🔒';
+        templateName = 'passwordReset';
+      } else {
+        subject = 'Your ReplyCraft Verification Code 🔒';
+        templateName = 'otpEmail';
+      }
       break;
     default:
       subject = 'ReplyCraft Notification';

@@ -124,12 +124,13 @@ async function queueTestEmail(user) {
 /**
  * Queue OTP email
  */
-async function queueOtpEmail(email, name, otp) {
+async function queueOtpEmail(email, name, otp, reason = 'login') {
   return queueEmail('otp', {
     type: 'otp',
     to: email,
     name: name || 'User',
-    otp: otp
+    otp: otp,
+    reason: reason
   });
 }
 
