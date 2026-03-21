@@ -189,7 +189,7 @@ const register = async (req, res) => {
     }
 
     // Queue OTP email
-    queueOtpEmail(user.email, user.name, otp).catch(err => {
+    queueOtpEmail(user.email, user.name, otp, { ip: req.ip, userAgent: req.headers['user-agent'] }).catch(err => {
       logger.error('Failed to queue OTP email', { error: err.message, userId: user._id });
     });
 
@@ -314,7 +314,7 @@ const login = async (req, res) => {
     logger.logAuth('User initiated login, OTP sent', { userId: user._id, email: user.email });
 
     // Queue OTP email
-    queueOtpEmail(user.email, user.name, otp).catch(err => {
+    queueOtpEmail(user.email, user.name, otp, { ip: req.ip, userAgent: req.headers['user-agent'] }).catch(err => {
       logger.error('Failed to queue OTP email during login', { error: err.message, userId: user._id });
     });
 
@@ -436,7 +436,7 @@ const resendOtp = async (req, res) => {
     logger.logAuth('Resent OTP', { userId: user._id, email: user.email });
 
     // Queue OTP email
-    queueOtpEmail(user.email, user.name, otp).catch(err => {
+    queueOtpEmail(user.email, user.name, otp, { ip: req.ip, userAgent: req.headers['user-agent'] }, 'resend-otp').catch(err => {
       logger.error('Failed to queue OTP email during resend', { error: err.message, userId: user._id });
     });
 
@@ -515,7 +515,7 @@ const forgotPassword = async (req, res) => {
     user.otpExpiresAt = new Date(Date.now() + 5 * 60000);
     await user.save();
 
-    queueOtpEmail(user.email, user.name, otp).catch(err => {
+    queueOtpEmail(user.email, user.name, otp, { ip: req.ip, userAgent: req.headers['user-agent'] }, 'password-reset').catch(err => {
       logger.error('Failed to queue OTP email for forgot password', { error: err.message });
     });
 

@@ -124,13 +124,54 @@ async function queueTestEmail(user) {
 /**
  * Queue OTP email
  */
-async function queueOtpEmail(email, name, otp, reason = 'login') {
+async function queueOtpEmail(email, name, otp, reqDetails = {}, reason = 'login') {
+  let deviceData = {
+    browser: 'Unknown',
+    os: 'Unknown',
+    city: 'Unknown',
+    region: 'Unknown',
+    loginDate: new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })
+  };
+
+  if (reqDetails.userAgent) {
+    try {
+      const UAParser = require('ua-parser-js');
+      const parser = new UAParser(reqDetails.userAgent);
+      const result = parser.getResult();
+      if (result.browser.name) deviceData.browser = `${result.browser.name} ${result.browser.version || ''}`;
+      if (result.os.name) deviceData.os = `${result.os.name} ${result.os.version || ''}`;
+    } catch (e) {
+      logger.warn('Failed to parse user agent for email', { error: e.message });
+    }
+  }
+
+  if (reqDetails.ip) {
+    try {
+      const axios = require('axios');
+      // Handle local loopback for testing
+      const ip = (reqDetails.ip === '::1' || reqDetails.ip === '127.0.0.1') ? '' : reqDetails.ip;
+      if (ip) {
+        const response = await axios.get(`http://ip-api.com/json/${ip}?fields=status,city,regionName`);
+        if (response.data && response.data.status === 'success') {
+          deviceData.city = response.data.city || 'Unknown';
+          deviceData.region = response.data.regionName || 'Unknown';
+        }
+      } else {
+        deviceData.city = 'Localhost';
+        deviceData.region = 'Localhost';
+      }
+    } catch (e) {
+      logger.warn('Failed to fetch GeoIP for email', { error: e.message });
+    }
+  }
+
   return queueEmail('otp', {
     type: 'otp',
     to: email,
     name: name || 'User',
     otp: otp,
-    reason: reason
+    reason: reason,
+    ...deviceData
   });
 }
 
