@@ -1,11 +1,10 @@
 /**
  * Email Worker
- * Processes email jobs from the queue
+ * Processes email jobs from the queue using the modular email system
  */
 
 const { Worker } = require('bullmq');
 const IORedis = require('ioredis');
-const nodemailer = require('nodemailer');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
@@ -13,35 +12,15 @@ const config = require('../config/config');
 
 const createRedisConnection = require('../config/redis');
 
+// Import the modular transporter singletons
+const { authTransporter, supportTransporter, noreplyTransporter } = require('../services/email/transporter');
+
 // Get the cleaned, standardized Redis connection
 const connection = createRedisConnection();
 
 connection.on('error', (err) => {
   logger.error('Redis connection error in email worker', { error: err.message });
 });
-
-// Create email transporter
-const createTransporter = () => {
-  const transporterConfig = {
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    secure: false,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
-    }
-  };
-
-  // If SMTP credentials are not configured, return null
-  if (!transporterConfig.auth.user || !transporterConfig.auth.pass) {
-    logger.warn('Email worker: SMTP not configured, emails will be mocked');
-    return null;
-  }
-
-  return nodemailer.createTransport(transporterConfig);
-};
-
-const transporter = createTransporter();
 
 // Template cache
 const templates = {};
@@ -83,11 +62,43 @@ function loadTemplate(templateName, data) {
 }
 
 /**
- * Send email
+ * Get the correct transporter and FROM address based on email type
  */
-async function sendEmail(to, subject, html) {
-  const from = process.env.EMAIL_FROM || 'ReplyCraft <noreply@replycraft.ai>';
-  
+function getTransporterForType(type) {
+  switch (type) {
+    case 'otp':
+    case 'passwordReset':
+    case 'verification':
+    case 'login':
+      return {
+        transporter: authTransporter,
+        from: process.env.AUTH_EMAIL_FROM
+      };
+    case 'ticketConfirmation':
+    case 'support':
+    case 'ticketReply':
+      return {
+        transporter: supportTransporter,
+        from: process.env.SUPPORT_EMAIL_FROM
+      };
+    case 'welcome':
+    case 'limitReached':
+    case 'integrationConnected':
+    case 'test':
+    default:
+      return {
+        transporter: noreplyTransporter,
+        from: process.env.NOREPLY_EMAIL_FROM
+      };
+  }
+}
+
+/**
+ * Send email using the correct transporter
+ */
+async function sendEmail(to, subject, html, type) {
+  const { transporter, from } = getTransporterForType(type);
+
   const mailOptions = {
     from,
     to,
@@ -96,25 +107,38 @@ async function sendEmail(to, subject, html) {
     text: html.replace(/<[^>]*>/g, '')
   };
 
+  // Debug: confirm FROM matches transporter auth user
+  console.log("ACTUAL FROM:", mailOptions.from);
+  console.log("Sending email:", {
+    from: mailOptions.from,
+    user: transporter ? transporter.options.auth.user : 'NO_TRANSPORTER'
+  });
+
   // If no transporter, just log
   if (!transporter) {
-    logger.info('[Email] Would send email', { to, subject, from });
+    logger.info('[Email] Would send email (mocked)', { to, subject, from });
     return { success: true, mocked: true };
   }
 
   try {
+    await transporter.verify();
     const info = await transporter.sendMail(mailOptions);
     logger.info('Email sent successfully', {
       messageId: info.messageId,
+      accepted: info.accepted,
+      rejected: info.rejected,
+      response: info.response,
       to,
-      subject
+      subject,
+      from
     });
     return { success: true, messageId: info.messageId };
   } catch (error) {
     logger.error('Failed to send email', {
       error: error.message,
       to,
-      subject
+      subject,
+      from
     });
     return { success: false, error: error.message };
   }
@@ -147,7 +171,7 @@ async function processEmailJob(job) {
       break;
     case 'test':
       subject = 'ReplyCraft Test Email ✅';
-      templateName = 'welcomeEmail'; // Reuse welcome template for test
+      templateName = 'welcomeEmail';
       break;
     case 'otp':
       if (data.reason === 'reset') {
@@ -173,7 +197,7 @@ async function processEmailJob(job) {
     throw new Error(`Failed to load template: ${templateName}`);
   }
   
-  const result = await sendEmail(to, subject, html);
+  const result = await sendEmail(to, subject, html, type);
   
   if (!result.success && !result.mocked) {
     throw new Error(result.error);
