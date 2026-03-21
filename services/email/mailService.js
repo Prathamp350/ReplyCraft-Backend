@@ -23,6 +23,8 @@ async function sendMail({ to, subject, html, text, from }) {
   }
 
   try {
+    await transporter.verify();
+    
     const info = await transporter.sendMail(mailOptions);
     logger.info('Email sent successfully', {
       messageId: info.messageId,
