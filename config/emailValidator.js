@@ -6,11 +6,15 @@
 const logger = require('../utils/logger');
 
 const requiredVars = [
-  'SMTP_HOST',
-  'SMTP_PORT',
-  'SMTP_USER',
-  'SMTP_PASS',
-  'EMAIL_FROM'
+  'AUTH_EMAIL_USER',
+  'AUTH_EMAIL_PASS',
+  'AUTH_EMAIL_FROM',
+  'SUPPORT_EMAIL_USER',
+  'SUPPORT_EMAIL_PASS',
+  'SUPPORT_EMAIL_FROM',
+  'NOREPLY_EMAIL_USER',
+  'NOREPLY_EMAIL_PASS',
+  'NOREPLY_EMAIL_FROM'
 ];
 
 /**
@@ -26,7 +30,7 @@ function validateEmailConfig() {
       missing.push(varName);
     } else {
       // Mask sensitive values in logs
-      const displayValue = varName === 'SMTP_PASS' ? '***' : value;
+      const displayValue = varName.includes('PASS') ? '***' : value;
       present.push(`${varName}: ${displayValue}`);
     }
   });
