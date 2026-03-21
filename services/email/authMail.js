@@ -1,8 +1,6 @@
 const { sendMail } = require('./mailService');
 const { authTransporter } = require('./transporter');
 
-const AUTH_FROM = 'ReplyCraft Auth <auth@replycraft.co.in>';
-
 async function sendPasswordResetEmail(user, resetToken) {
   const subject = 'Reset Your ReplyCraft Password 🔐';
   const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${resetToken}`;
@@ -43,12 +41,12 @@ async function sendPasswordResetEmail(user, resetToken) {
     to: user.email,
     subject,
     html,
-    from: AUTH_FROM
+    from: process.env.AUTH_EMAIL_FROM
   });
 }
 
 async function sendAuthEmail(to, subject, html, text = null) {
-  return sendMail({ transporter: authTransporter, to, subject, html, text, from: AUTH_FROM });
+  return sendMail({ transporter: authTransporter, to, subject, html, text, from: process.env.AUTH_EMAIL_FROM });
 }
 
 module.exports = {

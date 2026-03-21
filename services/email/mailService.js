@@ -30,9 +30,18 @@ async function sendMail({ transporter, to, subject, html, text, from }) {
         // Verify only on the first attempt to confirm connection
         await transporter.verify();
       }
+
+      console.log("Sending email:", {
+        from: mailOptions.from,
+        user: transporter.options.auth.user
+      });
+
       const info = await transporter.sendMail(mailOptions);
       logger.info('Email sent successfully', {
         messageId: info.messageId,
+        accepted: info.accepted,
+        rejected: info.rejected,
+        response: info.response,
         to,
         subject,
         from,
