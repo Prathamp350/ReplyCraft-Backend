@@ -1,4 +1,5 @@
 const { sendMail } = require('./mailService');
+const { authTransporter } = require('./transporter');
 
 const AUTH_FROM = 'ReplyCraft Auth <auth@replycraft.co.in>';
 
@@ -38,6 +39,7 @@ async function sendPasswordResetEmail(user, resetToken) {
   `;
 
   return sendMail({
+    transporter: authTransporter,
     to: user.email,
     subject,
     html,
@@ -46,7 +48,7 @@ async function sendPasswordResetEmail(user, resetToken) {
 }
 
 async function sendAuthEmail(to, subject, html, text = null) {
-  return sendMail({ to, subject, html, text, from: AUTH_FROM });
+  return sendMail({ transporter: authTransporter, to, subject, html, text, from: AUTH_FROM });
 }
 
 module.exports = {

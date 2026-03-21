@@ -1,4 +1,5 @@
 const { sendMail } = require('./mailService');
+const { noreplyTransporter } = require('./transporter');
 
 const SYSTEM_FROM = 'ReplyCraft <no-reply@replycraft.co.in>';
 
@@ -58,6 +59,7 @@ async function sendWelcomeEmail(user) {
   `;
 
   return sendMail({
+    transporter: noreplyTransporter,
     to: user.email,
     subject,
     html,
@@ -107,6 +109,7 @@ async function sendLimitReachedEmail(user) {
   `;
 
   return sendMail({
+    transporter: noreplyTransporter,
     to: user.email,
     subject,
     html,
@@ -159,6 +162,7 @@ async function sendIntegrationConnectedEmail(user, platform) {
   `;
 
   return sendMail({
+    transporter: noreplyTransporter,
     to: user.email,
     subject,
     html,
@@ -167,7 +171,7 @@ async function sendIntegrationConnectedEmail(user, platform) {
 }
 
 async function sendSystemEmail(to, subject, html, text = null) {
-  return sendMail({ to, subject, html, text, from: SYSTEM_FROM });
+  return sendMail({ transporter: noreplyTransporter, to, subject, html, text, from: SYSTEM_FROM });
 }
 
 module.exports = {
