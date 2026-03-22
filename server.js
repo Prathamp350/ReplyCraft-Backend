@@ -30,11 +30,25 @@ const { generalLimiter, authLimiter, aiLimiter } = require('./middleware/rateLim
 const { getHealth, getQueueMetrics } = require('./controllers/health.controller');
 const { sendTestEmail, getEmailStatus } = require('./controllers/test.controller');
 const { validateEmailConfig } = require('./config/emailValidator');
-const { handleWebhook, syncAllSubscriptions } = require('./controllers/webhook.controller');
+const { syncAllSubscriptions } = require('./controllers/webhook.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { bullBoardRouter } = require('./config/bullBoard');
-const cron = require('node-cron');
-const User = require('./models/User');
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:8080',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'https://replycraft.co.in',
+  'https://www.replycraft.co.in',
+];
+
+const allowedOrigins = new Set(
+  [
+    ...DEFAULT_ALLOWED_ORIGINS,
+    process.env.FRONTEND_URL,
+    process.env.APP_URL,
+    ...(process.env.ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()),
+  ].filter(Boolean)
+);
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads', 'avatars');
@@ -67,11 +81,22 @@ app.set('trust proxy', 1);
 // Security middleware
 app.use(helmet());
 
-// CORS configuration - allow dynamic frontend origins to prevent deployment blocks
+// CORS configuration
 app.use(cors({
   origin: function (origin, callback) {
-    // Dynamically allow the requesting origin to prevent deployment connectivity issues
-    callback(null, true);
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    const isAllowed =
+      allowedOrigins.has(origin) ||
+      origin.endsWith('.replycraft.co.in');
+
+    if (isAllowed) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Origin not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -81,9 +106,6 @@ app.use(cors({
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-
-// Stripe webhook - must be before regular JSON parsing for signature verification
-app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), handleWebhook);
 
 // Expose static folder for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -155,6 +177,13 @@ app.get('/', (req, res) => {
       generateReply: 'POST /api/reply/generate-reply',
       processReview: 'POST /api/reviews/process'
     }
+  });
+});
+
+// Get User Region via Cloudflare Header
+app.get('/api/region', (req, res) => {
+  res.status(200).json({
+    countryCode: req.headers['cf-ipcountry'] || 'US'
   });
 });
 

@@ -1,72 +1,108 @@
 /**
  * Rate Limiting Configuration
- * Global rate limiting for API endpoints
+ * Production: Uses Redis for distributed rate limiting.
+ * Development: Falls back to in-memory limiting if Redis is offline.
  */
 
-const rateLimit = require('express-rate-limit');
+const { rateLimit } = require('express-rate-limit');
+const Redis = require('ioredis');
 const logger = require('../utils/logger');
+const config = require('../config/config');
+
+let RedisStore;
+let redisClient;
+let useRedis = false;
+
+// Attempt to establish Redis connection (lazy — won't crash if offline)
+try {
+  const { RedisStore: RS } = require('rate-limit-redis');
+  RedisStore = RS;
+
+  redisClient = new Redis({
+    host: config.redis.host,
+    port: config.redis.port,
+    lazyConnect: true,        // Don't connect on construction
+    enableOfflineQueue: false, // Don't queue commands when offline
+    maxRetriesPerRequest: 1,   // Fail fast — don't hang for 20 retries
+    retryStrategy: () => null  // Disable automatic reconnect in dev
+  });
+
+  redisClient.on('error', (err) => {
+    if (useRedis) {
+      logger.warn('Redis Rate Limiter Error - falling back to memory', { error: err.message });
+      useRedis = false;
+    }
+  });
+
+  redisClient.connect().then(() => {
+    useRedis = true;
+    logger.info('Redis Rate Limiter connected');
+  }).catch(() => {
+    logger.warn('[RateLimiter] Redis offline - using in-memory fallback for rate limiting');
+  });
+
+} catch (e) {
+  logger.warn('[RateLimiter] rate-limit-redis not available - using in-memory fallback');
+}
+
+/**
+ * Build a rate limiter that uses Redis if available, memory otherwise
+ */
+const makeLimiter = ({ windowMs, limit, keyGenerator, message, prefix, logLabel }) => {
+  const opts = {
+    windowMs,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, message },
+    handler: (req, res, next, options) => {
+      logger.logRateLimit(logLabel || 'Rate limit exceeded', {
+        ip: req.headers['cf-connecting-ip'] || req.ip,
+        path: req.path,
+        userId: req.user?._id || req.userId
+      });
+      res.status(options.statusCode).json(options.message);
+    }
+  };
+
+  if (keyGenerator) opts.keyGenerator = keyGenerator;
+
+  if (useRedis && RedisStore && redisClient) {
+    opts.store = new RedisStore({
+      sendCommand: (...args) => redisClient.call(...args),
+      prefix: prefix || 'rl:'
+    });
+  }
+
+  return rateLimit(opts);
+};
 
 // General API rate limiter - 100 requests per 15 minutes
-const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: {
-    success: false,
-    message: 'Too many requests, please try again later.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res, next, options) => {
-    logger.logRateLimit('General rate limit exceeded', {
-      ip: req.ip,
-      path: req.path,
-      method: req.method
-    });
-    res.status(options.statusCode).json(options.message);
-  }
-});
-
-// Strict limiter for auth endpoints - 100 requests per 15 minutes for easier local testing
-const authLimiter = rateLimit({
+const generalLimiter = makeLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: {
-    success: false,
-    message: 'Too many authentication attempts, please try again later.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res, next, options) => {
-    logger.logRateLimit('Auth rate limit exceeded', {
-      ip: req.ip,
-      path: req.path,
-      email: req.body.email
-    });
-    res.status(options.statusCode).json(options.message);
-  }
+  limit: 100,
+  prefix: 'rl:general:',
+  message: 'Too many requests, please try again later.',
+  logLabel: 'General rate limit exceeded'
 });
 
-// AI generation limiter - 20 requests per hour per user
-const aiLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 20,
-  keyGenerator: (req) => {
-    // Use user ID if authenticated, otherwise use IP
-    return req.userId || req.ip;
-  },
-  message: {
-    success: false,
-    message: 'AI generation limit exceeded. Please try again later.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res, next, options) => {
-    logger.logRateLimit('AI rate limit exceeded', {
-      userId: req.userId,
-      ip: req.ip
-    });
-    res.status(options.statusCode).json(options.message);
-  }
+// Strict limiter for auth endpoints - 20 requests per 15 minutes
+const authLimiter = makeLimiter({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  prefix: 'rl:auth:',
+  message: 'Too many authentication attempts, please try again later.',
+  logLabel: 'Auth rate limit exceeded'
+});
+
+// AI endpoint: 10 requests per minute per user
+const aiLimiter = makeLimiter({
+  windowMs: 60 * 1000,
+  limit: 10,
+  prefix: 'rl:ai:',
+  message: 'Rate limit: Max 10 AI generation requests per minute.',
+  logLabel: 'AI rate limit exceeded',
+  keyGenerator: (req) => req.user?._id?.toString() || req.userId || req.headers['cf-connecting-ip'] || req.ip
 });
 
 module.exports = {

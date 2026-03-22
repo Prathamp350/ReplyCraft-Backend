@@ -65,14 +65,14 @@ const authenticate = async (req, res, next) => {
 
     // Check and sync subscription status
     await user.syncSubscriptionStatus();
-    
-    // Reload user after potential plan change
-    if (user.isModified && user.isModified('plan')) {
-      await user.reload();
-    }
 
-    // Check and update daily usage
-    user.checkDailyLimit();
+    // Normalize monthly usage counters when the month rolls over.
+    if (typeof user.checkMonthlyLimit === 'function') {
+      user.checkMonthlyLimit();
+      if (user.isModified('monthlyUsage')) {
+        await user.save();
+      }
+    }
 
     // Attach user to request
     req.user = user;

@@ -14,26 +14,40 @@ const googleReviewsService = require('../services/googleReviews.service');
 
 const createRedisConnection = require('../config/redis');
 
-// Get the cleaned, standardized Redis connection
+let aiWorker = null;
+
+// Only start if Redis is available
 const connection = createRedisConnection();
 
-connection.on('error', (err) => {
-  logger.error('Redis connection error in AI worker', { error: err.message });
+connection.on('error', () => {}); // suppress — handled by retryStrategy
+
+connection.on('ready', () => {
+  logger.info('[AIWorker] Redis connected — starting AI Worker');
 });
 
-// Create the AI worker
-const aiWorker = new Worker('reply-generation', async (job) => {
-  await processReplyJob(job);
-}, {
-  connection,
-  concurrency: 3,
-  limiter: {
-    max: 10,
-    duration: 1000
+const isRedisReachable = () => connection.status === 'ready';
+
+// Defer worker creation until after initial connection attempt
+setTimeout(() => {
+  if (!isRedisReachable()) {
+    logger.warn('[AIWorker] Redis not available — AI Worker disabled (dev mode)');
+    return;
   }
-});
 
-logger.info('[AIWorker] AI Worker started', { concurrency: 3 });
+  aiWorker = new Worker('reply-generation', async (job) => {
+    await processReplyJob(job);
+  }, {
+    connection,
+    concurrency: 3,
+    limiter: { max: 10, duration: 1000 }
+  });
+
+  aiWorker.on('completed', (job) => logger.logAI('Job completed', { jobId: job.id }));
+  aiWorker.on('failed', (job, err) => logger.error('Job failed', { jobId: job?.id, error: err.message }));
+  aiWorker.on('error', (error) => logger.error('Worker error', { error: error.message }));
+
+  logger.info('[AIWorker] AI Worker started', { concurrency: 3 });
+}, 3000);
 
 /**
  * Process a reply generation job
@@ -81,11 +95,11 @@ async function processReplyJob(job) {
     // Determine reply mode
     const replyMode = restaurantProfile?.replyMode || 'auto';
 
-    // Check daily usage limit
-    const usageInfo = user.checkDailyLimit();
+    // Check monthly usage limit
+    const usageInfo = user.checkMonthlyLimit();
     
     if (usageInfo.exceeded) {
-      logger.warn('Daily AI usage limit exceeded', { userId, limit: usageInfo.limit, used: usageInfo.used });
+      logger.warn('Monthly AI usage limit exceeded', { userId, limit: usageInfo.limit, used: usageInfo.used });
       await Review.findByIdAndUpdate(review._id, { status: 'ignored' });
       return;
     }
@@ -199,23 +213,10 @@ async function postToTripAdvisor(review, replyText) {
   logger.info('TripAdvisor integration not implemented yet');
 }
 
-// Worker events
-aiWorker.on('completed', (job) => {
-  logger.logAI('Job completed', { jobId: job.id });
-});
-
-aiWorker.on('failed', (job, err) => {
-  logger.error('Job failed', { jobId: job.id, error: err.message, stack: err.stack });
-});
-
-aiWorker.on('error', (error) => {
-  logger.error('Worker error', { error: error.message, stack: error.stack });
-});
-
 // Graceful shutdown
 const gracefulShutdown = async () => {
   logger.info('AI Worker shutting down gracefully');
-  await aiWorker.close();
+  if (aiWorker) await aiWorker.close();
   process.exit(0);
 };
 

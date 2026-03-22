@@ -29,6 +29,7 @@
     "multer-s3": "^3.0.1",
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.8",
+    "rate-limit-redis": "^4.3.1",
     "razorpay": "^2.9.2",
     "stripe": "^14.10.0",
     "ua-parser-js": "^2.0.9",

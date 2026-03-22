@@ -15,6 +15,8 @@ const createRedisConnection = () => {
     host = host.split(':')[0];
   }
 
+  const isProduction = process.env.NODE_ENV === 'production';
+
   const redisConfig = {
     host: host,
     port: parseInt(process.env.REDIS_PORT) || 6379,
@@ -22,8 +24,16 @@ const createRedisConnection = () => {
     enableReadyCheck: false,
     keepAlive: 10000,
     retryStrategy(times) {
-      const delay = Math.min(times * 50, 2000);
-      return delay; // Reconnect continuously
+      // In production, backoff indefinitely (Upstash/Railway will reconnect)
+      if (isProduction) {
+        return Math.min(times * 50, 2000);
+      }
+      // In development, stop retrying after 5 attempts to reduce noise
+      if (times > 5) {
+        logger.warn(`[Redis] No local Redis found after ${times} attempts. Workers will be inactive.`);
+        return null; // Stop retrying
+      }
+      return Math.min(times * 200, 2000);
     }
   };
 
@@ -31,8 +41,9 @@ const createRedisConnection = () => {
     redisConfig.password = process.env.REDIS_PASSWORD;
   }
 
-  // Upstash requires TLS for external connections
-  if (process.env.NODE_ENV === 'production' || process.env.REDIS_TLS === 'true' || host.includes('upstash.io')) {
+  // Enable TLS only when explicitly requested (Upstash or ElastiCache with in-transit encryption)
+  // AWS ElastiCache standard clusters do NOT use TLS by default
+  if (process.env.REDIS_TLS === 'true' || host.includes('upstash.io')) {
     redisConfig.tls = {};
   }
 

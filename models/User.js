@@ -49,7 +49,7 @@ const userSchema = new mongoose.Schema({
     enum: config.validPlans,
     default: config.defaultPlan
   },
-  dailyUsage: {
+  monthlyUsage: {
     count: {
       type: Number,
       default: 0
@@ -161,39 +161,39 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Check and reset daily usage
-userSchema.methods.checkDailyLimit = function() {
+// Check and reset monthly usage
+userSchema.methods.checkMonthlyLimit = function() {
   const now = new Date();
-  const lastReset = new Date(this.dailyUsage.lastReset);
+  const lastReset = new Date(this.monthlyUsage.lastReset);
   
-  // Check if it's a new day (midnight)
-  if (now.toDateString() !== lastReset.toDateString()) {
-    this.dailyUsage.count = 0;
-    this.dailyUsage.lastReset = now;
+  // Check if it's a new month
+  if (now.getMonth() !== lastReset.getMonth() || now.getFullYear() !== lastReset.getFullYear()) {
+    this.monthlyUsage.count = 0;
+    this.monthlyUsage.lastReset = now;
   }
   
   const planLimits = config.plans[this.plan] || config.plans.free;
-  const remaining = planLimits.dailyLimit - this.dailyUsage.count;
+  const remaining = planLimits.monthlyLimit - this.monthlyUsage.count;
   
   return {
-    used: this.dailyUsage.count,
-    limit: planLimits.dailyLimit,
+    used: this.monthlyUsage.count,
+    limit: planLimits.monthlyLimit,
     remaining: Math.max(0, remaining),
-    exceeded: this.dailyUsage.count >= planLimits.dailyLimit
+    exceeded: this.monthlyUsage.count >= planLimits.monthlyLimit
   };
 };
 
 // Increment usage
 userSchema.methods.incrementUsage = async function() {
-  await this.checkDailyLimit();
-  this.dailyUsage.count += 1;
+  await this.checkMonthlyLimit();
+  this.monthlyUsage.count += 1;
   await this.save();
 };
 
-// Reset daily usage
-userSchema.methods.resetDailyUsage = function() {
-  this.dailyUsage.count = 0;
-  this.dailyUsage.lastReset = new Date();
+// Reset monthly usage
+userSchema.methods.resetMonthlyUsage = function() {
+  this.monthlyUsage.count = 0;
+  this.monthlyUsage.lastReset = new Date();
 };
 
 /**
@@ -258,7 +258,7 @@ userSchema.methods.getSubscriptionInfo = function() {
     currentPeriodEnd: this.subscriptionCurrentPeriodEnd 
       ? Math.floor(this.subscriptionCurrentPeriodEnd.getTime() / 1000) 
       : null,
-    dailyLimit: planConfig.dailyLimit,
+    monthlyLimit: planConfig.monthlyLimit,
     perMinute: planConfig.perMinute
   };
 };

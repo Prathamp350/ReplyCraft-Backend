@@ -32,26 +32,26 @@ module.exports = {
   plans: {
     free: {
       name: 'Free',
-      dailyLimit: 5,
-      perMinute: 2
+      monthlyLimit: 30,
+      perMinute: 5
     },
-    go: {
-      name: 'Go',
-      dailyLimit: 200,
+    starter: {
+      name: 'Starter',
+      monthlyLimit: 300,
       perMinute: 10
     },
     pro: {
       name: 'Pro',
-      dailyLimit: 1000,
+      monthlyLimit: 1500,
       perMinute: 30
     },
-    ultra: {
-      name: 'Ultra',
-      dailyLimit: 5000,
+    business: {
+      name: 'Business',
+      monthlyLimit: 5000,
       perMinute: 100
     }
   },
   
   defaultPlan: 'free',
-  validPlans: ['free', 'go', 'pro', 'ultra']
+  validPlans: ['free', 'starter', 'pro', 'business']
 };

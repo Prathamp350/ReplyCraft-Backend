@@ -20,15 +20,15 @@ const PLANS = {
     name: 'Free',
     priceId: 'plan_free',
     price: 0, // ₹0
-    dailyLimit: 5,
-    perMinute: 2
+    monthlyLimit: 30,
+    perMinute: 5
   },
-  go: {
-    id: 'go',
-    name: 'Go',
-    priceId: process.env.RAZORPAY_PLAN_GO || 'plan_go',
+  starter: {
+    id: 'starter',
+    name: 'Starter',
+    priceId: process.env.RAZORPAY_PLAN_STARTER || 'plan_starter',
     price: 29900, // ₹299
-    dailyLimit: 200,
+    monthlyLimit: 300,
     perMinute: 10
   },
   pro: {
@@ -36,15 +36,15 @@ const PLANS = {
     name: 'Pro',
     priceId: process.env.RAZORPAY_PLAN_PRO || 'plan_pro',
     price: 79900, // ₹799
-    dailyLimit: 1000,
+    monthlyLimit: 1500,
     perMinute: 30
   },
-  ultra: {
-    id: 'ultra',
-    name: 'Ultra',
-    priceId: process.env.RAZORPAY_PLAN_ULTRA || 'plan_ultra',
-    price: 199900, // ₹1999
-    dailyLimit: 5000,
+  business: {
+    id: 'business',
+    name: 'Business',
+    priceId: process.env.RAZORPAY_PLAN_BUSINESS || 'plan_business',
+    price: 249900, // ₹2499
+    monthlyLimit: 5000,
     perMinute: 100
   }
 };
@@ -59,7 +59,7 @@ const getPlans = async (req, res) => {
       name: plan.name,
       price: plan.price / 100, // Convert to rupees
       pricePaise: plan.price,
-      dailyLimit: plan.dailyLimit,
+      monthlyLimit: plan.monthlyLimit,
       perMinute: plan.perMinute
     }));
 
@@ -86,7 +86,7 @@ const createOrder = async (req, res) => {
     if (!planType || !PLANS[planType]) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid plan. Choose from: free, go, pro, ultra'
+          error: 'Invalid plan. Choose from: free, starter, pro, business'
       });
     }
 
@@ -130,7 +130,7 @@ const createOrder = async (req, res) => {
       plan: {
         id: plan.id,
         name: plan.name,
-        dailyLimit: plan.dailyLimit
+        monthlyLimit: plan.monthlyLimit
       }
     });
 
@@ -215,7 +215,7 @@ const verifyPayment = async (req, res) => {
       plan: {
         id: plan.id,
         name: plan.name,
-        dailyLimit: plan.dailyLimit
+        monthlyLimit: plan.monthlyLimit
       },
       subscription: {
         status: 'active',
@@ -251,7 +251,7 @@ const getSubscriptionStatus = async (req, res) => {
       currentPeriodEnd: user.subscriptionCurrentPeriodEnd 
         ? Math.floor(user.subscriptionCurrentPeriodEnd.getTime() / 1000) 
         : null,
-      dailyLimit: plan.dailyLimit,
+      monthlyLimit: plan.monthlyLimit,
       perMinute: plan.perMinute,
       razorpayPaymentId: user.razorpayPaymentId || null
     });
@@ -324,9 +324,13 @@ const handleWebhook = async (req, res) => {
     const signature = req.headers['x-razorpay-signature'];
 
     // Verify webhook signature
+    const rawPayload = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(JSON.stringify(req.body));
+
     const generatedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(JSON.stringify(req.body))
+      .update(rawPayload)
       .digest('hex');
 
     if (signature !== generatedSignature) {
@@ -334,7 +338,9 @@ const handleWebhook = async (req, res) => {
       return res.status(400).json({ error: 'Invalid signature' });
     }
 
-    const event = req.body;
+    const event = Buffer.isBuffer(req.body)
+      ? JSON.parse(req.body.toString('utf8'))
+      : req.body;
     const { event: eventType } = event;
 
     logger.info('Razorpay webhook received', { eventType });
@@ -399,8 +405,8 @@ module.exports = {
       
       return res.status(200).json({
         success: true,
-        aiRepliesUsed: user.dailyUsage?.count || 0,
-        aiRepliesLimit: plan.dailyLimit,
+        aiRepliesUsed: user.monthlyUsage?.count || 0,
+        aiRepliesLimit: plan.monthlyLimit,
         platformsConnected: 0,
         platformsLimit: null,
         storageUsedGb: 0,
@@ -436,30 +442,26 @@ module.exports = {
       const currentPlan = {
         id: plan.id,
         name: plan.name,
-        price: plan.price === 0 ? '$0' : `$${plan.price / 100}`,
+        price: plan.price === 0 ? '₹0' : `₹${plan.price / 100}`,
         period: '/mo',
-        repliesPerDay: plan.dailyLimit === 5 ? '5/day' : 
-                       plan.dailyLimit === 200 ? '200/day' : 
-                       plan.dailyLimit === 1000 ? '1,000/day' : '5,000/day',
+        repliesPerDay: formatPlanReplies(plan.monthlyLimit),
         features: getPlanFeatures(plan.id),
         icon: getPlanIcon(plan.id),
         popular: plan.id === 'pro',
-        order: plan.id === 'free' ? 0 : plan.id === 'go' ? 1 : plan.id === 'pro' ? 2 : 3
+        order: getPlanOrder(plan.id)
       };
 
       // All plans
       const allPlans = Object.entries(PLANS).map(([key, p]) => ({
         id: p.id,
         name: p.name,
-        price: p.price === 0 ? '$0' : `$${p.price / 100}`,
+        price: p.price === 0 ? '₹0' : `₹${p.price / 100}`,
         period: '/mo',
-        repliesPerDay: p.dailyLimit === 5 ? '5/day' : 
-                       p.dailyLimit === 200 ? '200/day' : 
-                       p.dailyLimit === 1000 ? '1,000/day' : '5,000/day',
+        repliesPerDay: formatPlanReplies(p.monthlyLimit),
         features: getPlanFeatures(p.id),
         icon: getPlanIcon(p.id),
         popular: p.id === 'pro',
-        order: p.id === 'free' ? 0 : p.id === 'go' ? 1 : p.id === 'pro' ? 2 : 3
+        order: getPlanOrder(p.id)
       }));
 
       const nextBillingDate = user.subscriptionCurrentPeriodEnd 
@@ -472,8 +474,8 @@ module.exports = {
         allPlans,
         nextBillingDate,
         usage: {
-          aiRepliesUsed: user.dailyUsage?.count || 0,
-          aiRepliesLimit: plan.dailyLimit,
+          aiRepliesUsed: user.monthlyUsage?.count || 0,
+          aiRepliesLimit: plan.monthlyLimit,
           platformsConnected: 0,
           platformsLimit: null,
           storageUsedGb: 0,
@@ -491,10 +493,10 @@ module.exports = {
 // Helper functions
 function getPlanFeatures(planId) {
   const features = {
-    free: ['5 AI replies/day', '1 platform', 'Basic analytics', 'Email support'],
-    go: ['200 AI replies/day', '3 platforms', 'Advanced analytics', 'Priority support'],
-    pro: ['1,000 AI replies/day', 'Unlimited platforms', 'Full analytics suite', 'Dedicated support', 'Custom templates'],
-    ultra: ['5,000 AI replies/day', 'Unlimited platforms', 'White-label reports', 'API access', 'Account manager']
+    free: ['30 AI replies/month', '1 platform', 'Basic analytics', 'Email support'],
+    starter: ['300 AI replies/month', '3 platforms', 'Advanced analytics', 'Priority support'],
+    pro: ['1,500 AI replies/month', 'Unlimited platforms', 'Full analytics suite', 'Dedicated support', 'Custom templates'],
+    business: ['5,000 AI replies/month', 'Unlimited platforms', 'White-label reports', 'API access', 'Account manager']
   };
   return features[planId] || features.free;
 }
@@ -502,9 +504,20 @@ function getPlanFeatures(planId) {
 function getPlanIcon(planId) {
   const icons = {
     free: 'zap',
-    go: 'rocket',
+    starter: 'rocket',
     pro: 'crown',
-    ultra: 'sparkles'
+    business: 'sparkles'
   };
   return icons[planId] || 'zap';
+}
+
+function getPlanOrder(planId) {
+  if (planId === 'free') return 0;
+  if (planId === 'starter') return 1;
+  if (planId === 'pro') return 2;
+  return 3;
+}
+
+function formatPlanReplies(monthlyLimit) {
+  return `${monthlyLimit.toLocaleString()}/month`;
 }

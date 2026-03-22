@@ -6,7 +6,7 @@
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
-const PREMIUM_PLANS = ['pro', 'ultra', 'enterprise'];
+const PREMIUM_PLANS = ['starter', 'pro', 'business'];
 
 /**
  * Middleware to check if user has premium subscription
@@ -50,7 +50,7 @@ const requirePremium = async (req, res, next) => {
 };
 
 /**
- * Middleware to check daily usage limit
+ * Middleware to check current usage limit
  * Use after authenticate middleware
  */
 const checkDailyLimit = async (req, res, next) => {
@@ -64,54 +64,38 @@ const checkDailyLimit = async (req, res, next) => {
       });
     }
 
-    // Get plan limits
-    const planLimits = {
-      free: 5,
-      go: 200,
-      pro: 1000,
-      ultra: 5000
-    };
-    
-    const limit = planLimits[user.plan] || 5;
-    const usage = user.dailyUsage?.count || 0;
-    
-    // Reset daily count if it's a new day
-    const lastReset = user.dailyUsage?.lastReset;
-    if (lastReset) {
-      const today = new Date();
-      const resetDate = new Date(lastReset);
-      if (today.toDateString() !== resetDate.toDateString()) {
-        // Reset count
-        user.dailyUsage.count = 0;
-        user.dailyUsage.lastReset = new Date();
-        await user.save();
-      }
+    const usageInfo = typeof user.checkMonthlyLimit === 'function'
+      ? user.checkMonthlyLimit()
+      : { used: user.monthlyUsage?.count || 0, limit: 30, remaining: 30, exceeded: false };
+
+    if (user.isModified('monthlyUsage')) {
+      await user.save();
     }
 
-    if (usage >= limit) {
+    if (usageInfo.exceeded) {
       logger.warn('Daily limit exceeded', {
         userId: user._id,
-        usage,
-        limit,
+        usage: usageInfo.used,
+        limit: usageInfo.limit,
         plan: user.plan
       });
       
       return res.status(429).json({
         success: false,
-        error: 'Daily usage limit exceeded.',
-        code: 'DAILY_LIMIT_EXCEEDED',
-        used: usage,
-        limit: limit,
-        remaining: 0,
+        error: 'Usage limit exceeded.',
+        code: 'USAGE_LIMIT_EXCEEDED',
+        used: usageInfo.used,
+        limit: usageInfo.limit,
+        remaining: usageInfo.remaining,
         upgradeUrl: '/dashboard/upgrade'
       });
     }
 
     // Attach usage info to request
     req.usage = {
-      used,
-      limit,
-      remaining: limit - usage
+      used: usageInfo.used,
+      limit: usageInfo.limit,
+      remaining: usageInfo.remaining
     };
     
     next();
@@ -131,12 +115,11 @@ const incrementUsage = async (userId, count = 1) => {
     const user = await User.findById(userId);
     if (!user) return;
     
-    if (!user.dailyUsage) {
-      user.dailyUsage = { count: 0, lastReset: new Date() };
+    if (typeof user.incrementUsage === 'function') {
+      for (let i = 0; i < count; i += 1) {
+        await user.incrementUsage();
+      }
     }
-    
-    user.dailyUsage.count += count;
-    await user.save();
   } catch (error) {
     logger.error('Failed to increment usage', { error: error.message, userId });
   }

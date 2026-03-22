@@ -30,19 +30,20 @@ const generateReply = async (req, res) => {
       });
     }
 
-    // Validate review length
-    if (review.length > 5000) {
+    // Validate review length based on plan tier
+    const maxLength = user.plan === 'free' ? 1000 : 5000;
+    if (review.length > maxLength) {
       return res.status(400).json({
         success: false,
-        error: 'Review text is too long (max 5000 characters)'
+        error: `Review text is too long (max ${maxLength} characters for ${user.plan} plan)`
       });
     }
 
     // Check daily usage limit
-    const usageInfo = user.checkDailyLimit();
+    const usageInfo = user.checkMonthlyLimit();
     
     if (usageInfo.exceeded) {
-      logger.logWarn('Daily AI usage limit exceeded', { 
+      logger.logWarn('Monthly AI usage limit exceeded', { 
         userId: user._id, 
         plan: user.plan,
         limit: usageInfo.limit,
@@ -54,14 +55,14 @@ const generateReply = async (req, res) => {
         name: user.name,
         email: user.email,
         plan: user.plan,
-        dailyUsage: usageInfo
+        monthlyUsage: usageInfo
       }).catch(err => {
         logger.error('Failed to queue limit reached email', { error: err.message, userId: user._id });
       });
 
       return res.status(429).json({
         success: false,
-        message: 'Daily AI usage limit reached. Upgrade your plan for more generation.',
+        message: 'Monthly AI usage limit reached. Upgrade your plan for more generation.',
         usage: usageInfo,
         upgradeUrl: '/dashboard/upgrade'
       });
@@ -103,7 +104,7 @@ const generateReply = async (req, res) => {
     await user.incrementUsage();
 
     // Get updated usage
-    const updatedUsage = user.checkDailyLimit();
+    const updatedUsage = user.checkMonthlyLimit();
 
     logger.logAI('AI reply generated successfully', { 
       userId: user._id, 

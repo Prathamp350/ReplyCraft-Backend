@@ -105,7 +105,7 @@ const googleLogin = async (req, res) => {
         name: user.name,
         email: user.email,
         plan: user.plan,
-        dailyUsage: user.dailyUsage,
+        monthlyUsage: user.monthlyUsage,
         avatarUrl: user.avatarUrl,
         isOnboarded: user.isOnboarded
       },
@@ -370,7 +370,7 @@ const verifyOtp = async (req, res) => {
     user.otpExpiresAt = null;
 
     // Check and reset daily usage if needed
-    user.checkDailyLimit();
+    user.checkMonthlyLimit();
     await user.save();
 
     if (newlyVerified && isNewAccount) {
@@ -397,7 +397,7 @@ const verifyOtp = async (req, res) => {
         name: user.name,
         email: user.email,
         plan: user.plan,
-        dailyUsage: user.dailyUsage,
+        monthlyUsage: user.monthlyUsage,
         avatarUrl: user.avatarUrl,
         isOnboarded: user.isOnboarded
       },
@@ -469,7 +469,7 @@ const getCurrentUser = async (req, res) => {
         name: user.name,
         email: user.email,
         plan: user.plan,
-        dailyUsage: user.dailyUsage,
+        monthlyUsage: user.monthlyUsage,
         avatarUrl: user.avatarUrl,
         phoneNumber: user.phoneNumber,
         businessName: user.businessName,

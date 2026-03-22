@@ -18,9 +18,8 @@ const { authTransporter, supportTransporter, noreplyTransporter } = require('../
 // Get the cleaned, standardized Redis connection
 const connection = createRedisConnection();
 
-connection.on('error', (err) => {
-  logger.error('Redis connection error in email worker', { error: err.message });
-});
+// Suppress connection errors — handled by retryStrategy in redis.js
+connection.on('error', () => {});
 
 // Template cache
 const templates = {};
