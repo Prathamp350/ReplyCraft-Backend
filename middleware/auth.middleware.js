@@ -9,6 +9,8 @@ const baseConfig = require('../config/config');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
+const getJwtSecret = () => baseConfig?.jwt?.secret || process.env.JWT_SECRET;
+
 /**
  * Main authentication middleware
  * Accepts either Firebase ID token or JWT token
@@ -37,7 +39,7 @@ const authenticate = async (req, res, next) => {
     let authMethod = 'jwt';
 
     try {
-        const decoded = jwt.verify(token, config.jwt.secret);
+        const decoded = jwt.verify(token, getJwtSecret());
         
         user = await User.findById(decoded.userId);
         
