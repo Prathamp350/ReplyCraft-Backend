@@ -18,6 +18,30 @@ const logger = require('../utils/logger');
 const isPlaceholderValue = (value = '') =>
   !value || value.startsWith('your_') || value.includes('change_me');
 
+const getGatewayErrorDetails = (error) => {
+  const gatewayPayload =
+    error?.error ||
+    error?.response?.data?.error ||
+    error?.response?.data ||
+    null;
+
+  const gatewayDescription =
+    gatewayPayload?.description ||
+    gatewayPayload?.reason ||
+    gatewayPayload?.message ||
+    gatewayPayload?.field ||
+    null;
+
+  return {
+    message: gatewayDescription || error?.message || 'Unknown payment gateway error',
+    code: gatewayPayload?.code || error?.code || null,
+    source: gatewayPayload?.source || null,
+    step: gatewayPayload?.step || null,
+    field: gatewayPayload?.field || null,
+    metadata: gatewayPayload,
+  };
+};
+
 const assertRazorpayConfigured = () => {
   if (
     isPlaceholderValue(process.env.RAZORPAY_KEY_ID) ||
@@ -266,16 +290,23 @@ const createOrder = async (req, res) => {
 
   } catch (error) {
     const statusCode = error.statusCode || 500;
+    const gatewayError = getGatewayErrorDetails(error);
     logger.error('Failed to create order', {
-      error: error.message,
+      error: gatewayError.message,
+      gatewayCode: gatewayError.code,
+      gatewaySource: gatewayError.source,
+      gatewayStep: gatewayError.step,
+      gatewayField: gatewayError.field,
+      gatewayMetadata: gatewayError.metadata,
       userId: req.userId,
       planType: req.body?.plan,
-      quoteId: req.body?.quoteId
+      quoteId: req.body?.quoteId,
+      razorpayKeyPrefix: (process.env.RAZORPAY_KEY_ID || '').slice(0, 8)
     });
 
     return res.status(statusCode).json({
       success: false,
-      error: error.message || 'Failed to create payment order'
+      error: gatewayError.message || 'Failed to create payment order'
     });
   }
 };
@@ -452,8 +483,14 @@ const verifyPayment = async (req, res) => {
 
   } catch (error) {
     const statusCode = error.statusCode || 500;
+    const gatewayError = getGatewayErrorDetails(error);
     logger.error('Payment verification error', {
-      error: error.message,
+      error: gatewayError.message,
+      gatewayCode: gatewayError.code,
+      gatewaySource: gatewayError.source,
+      gatewayStep: gatewayError.step,
+      gatewayField: gatewayError.field,
+      gatewayMetadata: gatewayError.metadata,
       userId: req.userId,
       orderId: req.body?.razorpay_order_id,
       paymentId: req.body?.razorpay_payment_id
@@ -461,7 +498,7 @@ const verifyPayment = async (req, res) => {
 
     return res.status(statusCode).json({
       success: false,
-      error: error.message || 'Payment verification failed'
+      error: gatewayError.message || 'Payment verification failed'
     });
   }
 };
