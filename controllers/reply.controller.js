@@ -39,7 +39,7 @@ const generateReply = async (req, res) => {
       });
     }
 
-    // Check daily usage limit
+    // Check monthly usage limit
     const usageInfo = user.checkMonthlyLimit();
     
     if (usageInfo.exceeded) {
@@ -64,6 +64,20 @@ const generateReply = async (req, res) => {
         success: false,
         message: 'Monthly AI usage limit reached. Upgrade your plan for more generation.',
         usage: usageInfo,
+        upgradeUrl: '/dashboard/upgrade'
+      });
+    }
+
+    // Check storage limit before generating
+    const storageInfo = user.getStorageInfo();
+    if (storageInfo.exceeded) {
+      return res.status(403).json({
+        success: false,
+        error: 'Storage limit exceeded. Upgrade your plan or purchase additional storage.',
+        code: 'STORAGE_LIMIT_EXCEEDED',
+        usedMB: storageInfo.usedMB,
+        totalLimitMB: storageInfo.totalLimitMB,
+        canBuyExtra: storageInfo.canBuyExtra,
         upgradeUrl: '/dashboard/upgrade'
       });
     }
@@ -98,17 +112,29 @@ const generateReply = async (req, res) => {
     const rawReply = await ollamaService.generateReply(requestedModel, prompt);
 
     // Clean the response
-    const reply = cleanReplyUtil.cleanReply(rawReply);
+    let reply = cleanReplyUtil.cleanReply(rawReply);
+
+    // Append watermark for Free plan users
+    const planConfig = user.getPlanConfig();
+    if (planConfig.hasWatermark) {
+      reply = reply + config.watermarkText;
+    }
 
     // Increment usage counter
     await user.incrementUsage();
+
+    // Track storage usage (approximate: bytes of reply + review stored)
+    const storedBytes = Buffer.byteLength(reply, 'utf8') + Buffer.byteLength(review, 'utf8');
+    await user.addStorageUsage(storedBytes);
 
     // Get updated usage
     const updatedUsage = user.checkMonthlyLimit();
 
     logger.logAI('AI reply generated successfully', { 
       userId: user._id, 
-      remaining: updatedUsage.remaining
+      remaining: updatedUsage.remaining,
+      watermark: planConfig.hasWatermark,
+      storedBytes
     });
 
     // Return success response

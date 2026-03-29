@@ -95,7 +95,7 @@ const authenticate = async (req, res, next) => {
 };
 
 /**
- * Require premium subscription
+ * Require premium subscription (any paid plan)
  * Use after authenticate middleware
  */
 const requirePremium = (req, res, next) => {
@@ -108,9 +108,10 @@ const requirePremium = (req, res, next) => {
     });
   }
 
-  const premiumPlans = ['pro', 'ultra', 'enterprise'];
+  // All paid plans from centralized config
+  const paidPlans = config.validPlans.filter(p => p !== 'free');
   
-  if (!premiumPlans.includes(user.plan)) {
+  if (!paidPlans.includes(user.plan)) {
     return res.status(403).json({
       success: false,
       error: 'Premium subscription required.',
@@ -136,13 +137,13 @@ const checkUsageLimit = async (req, res, next) => {
     });
   }
 
-  const usage = user.checkDailyLimit();
+  const usage = user.checkMonthlyLimit();
   
   if (usage.exceeded) {
     return res.status(429).json({
       success: false,
-      error: 'Daily usage limit exceeded.',
-      code: 'DAILY_LIMIT_EXCEEDED',
+      error: 'Monthly usage limit exceeded.',
+      code: 'USAGE_LIMIT_EXCEEDED',
       used: usage.used,
       limit: usage.limit,
       remaining: usage.remaining

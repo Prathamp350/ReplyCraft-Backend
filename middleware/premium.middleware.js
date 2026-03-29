@@ -1,12 +1,15 @@
 /**
  * Premium Feature Middleware
- * Restricts access to premium features based on user plan
+ * Restricts access to features based on user plan
+ * Enforces platform, storage, and reply limits
  */
 
 const User = require('../models/User');
+const BusinessConnection = require('../models/BusinessConnection');
+const config = require('../config/config');
 const logger = require('../utils/logger');
 
-const PREMIUM_PLANS = ['starter', 'pro', 'business'];
+const PREMIUM_PLANS = config.validPlans.filter(p => p !== 'free');
 
 /**
  * Middleware to check if user has premium subscription
@@ -50,6 +53,36 @@ const requirePremium = async (req, res, next) => {
 };
 
 /**
+ * Require a minimum plan tier
+ * Usage: requirePlan('pro') — allows pro, business
+ */
+const requirePlan = (minPlan) => {
+  const planOrder = { free: 0, starter: 1, pro: 2, business: 3 };
+  const minOrder = planOrder[minPlan] || 0;
+
+  return (req, res, next) => {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required.' });
+    }
+
+    const userOrder = planOrder[user.plan] || 0;
+    if (userOrder < minOrder) {
+      return res.status(403).json({
+        success: false,
+        error: `This feature requires the ${config.plans[minPlan]?.name || minPlan} plan or higher.`,
+        code: 'PLAN_REQUIRED',
+        currentPlan: user.plan,
+        requiredPlan: minPlan,
+        upgradeUrl: '/dashboard/upgrade'
+      });
+    }
+
+    next();
+  };
+};
+
+/**
  * Middleware to check current usage limit
  * Use after authenticate middleware
  */
@@ -73,7 +106,7 @@ const checkDailyLimit = async (req, res, next) => {
     }
 
     if (usageInfo.exceeded) {
-      logger.warn('Daily limit exceeded', {
+      logger.warn('Monthly limit exceeded', {
         userId: user._id,
         usage: usageInfo.used,
         limit: usageInfo.limit,
@@ -107,6 +140,96 @@ const checkDailyLimit = async (req, res, next) => {
 };
 
 /**
+ * Check if user can connect another platform
+ * Use after authenticate middleware, before creating a new integration
+ */
+const checkPlatformLimit = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required.' });
+    }
+
+    const planConfig = user.getPlanConfig();
+    
+    // Unlimited platforms for business
+    if (planConfig.platformLimit === Infinity) {
+      return next();
+    }
+
+    // Count active connections
+    const activeCount = await BusinessConnection.countDocuments({
+      userId: user._id,
+      isActive: true
+    });
+
+    if (activeCount >= planConfig.platformLimit) {
+      logger.warn('Platform limit reached', {
+        userId: user._id,
+        plan: user.plan,
+        connected: activeCount,
+        limit: planConfig.platformLimit
+      });
+
+      return res.status(403).json({
+        success: false,
+        error: `Your ${planConfig.name} plan supports up to ${planConfig.platformLimit} platform(s). Upgrade to connect more.`,
+        code: 'PLATFORM_LIMIT_REACHED',
+        connected: activeCount,
+        limit: planConfig.platformLimit,
+        upgradeUrl: '/dashboard/upgrade'
+      });
+    }
+
+    req.platformUsage = { connected: activeCount, limit: planConfig.platformLimit };
+    next();
+  } catch (error) {
+    logger.error('Platform limit check error', { error: error.message });
+    next(); // Don't block on error
+  }
+};
+
+/**
+ * Check if user has available storage
+ * Use after authenticate middleware, before storing data
+ */
+const checkStorageLimit = async (req, res, next) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required.' });
+    }
+
+    const storageInfo = user.getStorageInfo();
+
+    if (storageInfo.exceeded) {
+      logger.warn('Storage limit exceeded', {
+        userId: user._id,
+        plan: user.plan,
+        usedMB: storageInfo.usedMB,
+        totalLimitMB: storageInfo.totalLimitMB
+      });
+
+      return res.status(403).json({
+        success: false,
+        error: 'Storage limit exceeded. Upgrade your plan or purchase additional storage.',
+        code: 'STORAGE_LIMIT_EXCEEDED',
+        usedMB: storageInfo.usedMB,
+        totalLimitMB: storageInfo.totalLimitMB,
+        canBuyExtra: storageInfo.canBuyExtra,
+        upgradeUrl: '/dashboard/upgrade'
+      });
+    }
+
+    req.storageInfo = storageInfo;
+    next();
+  } catch (error) {
+    logger.error('Storage limit check error', { error: error.message });
+    next(); // Don't block on error
+  }
+};
+
+/**
  * Increment daily usage count
  * Call after successful AI reply generation
  */
@@ -127,7 +250,10 @@ const incrementUsage = async (userId, count = 1) => {
 
 module.exports = {
   requirePremium,
+  requirePlan,
   checkDailyLimit,
+  checkPlatformLimit,
+  checkStorageLimit,
   incrementUsage,
   PREMIUM_PLANS
 };

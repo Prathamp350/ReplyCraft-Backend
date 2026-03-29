@@ -1,10 +1,13 @@
 /**
  * Billing Controller
  * Handles Razorpay payments and subscriptions
+ * Uses centralized plan config from config/config.js
  */
 
 const Razorpay = require('razorpay');
 const User = require('../models/User');
+const BusinessConnection = require('../models/BusinessConnection');
+const config = require('../config/config');
 const logger = require('../utils/logger');
 
 // Initialize Razorpay
@@ -13,55 +16,43 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET || 'your_key_secret'
 });
 
-// Plan configuration (in paise - multiply by 100)
-const PLANS = {
-  free: {
-    id: 'free',
-    name: 'Free',
-    priceId: 'plan_free',
-    price: 0, // ₹0
-    monthlyLimit: 30,
-    perMinute: 5
-  },
-  starter: {
-    id: 'starter',
-    name: 'Starter',
-    priceId: process.env.RAZORPAY_PLAN_STARTER || 'plan_starter',
-    price: 29900, // ₹299
-    monthlyLimit: 300,
-    perMinute: 10
-  },
-  pro: {
-    id: 'pro',
-    name: 'Pro',
-    priceId: process.env.RAZORPAY_PLAN_PRO || 'plan_pro',
-    price: 79900, // ₹799
-    monthlyLimit: 1500,
-    perMinute: 30
-  },
-  business: {
-    id: 'business',
-    name: 'Business',
-    priceId: process.env.RAZORPAY_PLAN_BUSINESS || 'plan_business',
-    price: 249900, // ₹2499
-    monthlyLimit: 5000,
-    perMinute: 100
-  }
-};
+// Derive Razorpay plan config from centralized config
+function getRazorpayPlan(planId) {
+  const plan = config.plans[planId];
+  if (!plan) return null;
+  return {
+    id: planId,
+    name: plan.name,
+    priceId: process.env[`RAZORPAY_PLAN_${planId.toUpperCase()}`] || `plan_${planId}`,
+    price: plan.priceINR * 100, // paise
+    monthlyLimit: plan.monthlyLimit,
+    perMinute: plan.perMinute,
+    platformLimit: plan.platformLimit,
+    storageMB: plan.storageMB,
+    hasWatermark: plan.hasWatermark,
+  };
+}
 
 /**
  * Get available plans
  */
 const getPlans = async (req, res) => {
   try {
-    const plans = Object.entries(PLANS).map(([key, plan]) => ({
-      id: key,
-      name: plan.name,
-      price: plan.price / 100, // Convert to rupees
-      pricePaise: plan.price,
-      monthlyLimit: plan.monthlyLimit,
-      perMinute: plan.perMinute
-    }));
+    const plans = config.validPlans.map(key => {
+      const plan = config.plans[key];
+      return {
+        id: key,
+        name: plan.name,
+        price: plan.priceINR,
+        pricePaise: plan.priceINR * 100,
+        monthlyLimit: plan.monthlyLimit,
+        perMinute: plan.perMinute,
+        platformLimit: plan.platformLimit === Infinity ? null : plan.platformLimit,
+        storageMB: plan.storageMB,
+        hasWatermark: plan.hasWatermark,
+        features: plan.features,
+      };
+    });
 
     return res.status(200).json({
       success: true,
@@ -83,14 +74,14 @@ const createOrder = async (req, res) => {
     const user = req.user;
 
     // Validate plan
-    if (!planType || !PLANS[planType]) {
+    if (!planType || !config.plans[planType]) {
       return res.status(400).json({
         success: false,
-          error: 'Invalid plan. Choose from: free, starter, pro, business'
+        error: `Invalid plan. Choose from: ${config.validPlans.join(', ')}`
       });
     }
 
-    const plan = PLANS[planType];
+    const rpPlan = getRazorpayPlan(planType);
 
     // Free plan doesn't need payment
     if (planType === 'free') {
@@ -102,7 +93,7 @@ const createOrder = async (req, res) => {
 
     // Create Razorpay order
     const options = {
-      amount: plan.price, // Amount in paise
+      amount: rpPlan.price, // Amount in paise
       currency: 'INR',
       receipt: `receipt_${user._id}_${Date.now()}`,
       notes: {
@@ -118,7 +109,7 @@ const createOrder = async (req, res) => {
       orderId: order.id,
       userId: user._id,
       plan: planType,
-      amount: plan.price
+      amount: rpPlan.price
     });
 
     return res.status(200).json({
@@ -128,9 +119,9 @@ const createOrder = async (req, res) => {
       currency: order.currency,
       keyId: process.env.RAZORPAY_KEY_ID,
       plan: {
-        id: plan.id,
-        name: plan.name,
-        monthlyLimit: plan.monthlyLimit
+        id: rpPlan.id,
+        name: rpPlan.name,
+        monthlyLimit: rpPlan.monthlyLimit
       }
     });
 
@@ -164,7 +155,7 @@ const verifyPayment = async (req, res) => {
     }
 
     // Validate plan
-    if (!planType || !PLANS[planType]) {
+    if (!planType || !config.plans[planType]) {
       return res.status(400).json({
         success: false,
         error: 'Invalid plan'
@@ -191,7 +182,7 @@ const verifyPayment = async (req, res) => {
     }
 
     // Payment verified - update user plan
-    const plan = PLANS[planType];
+    const plan = config.plans[planType];
     
     user.plan = planType;
     user.razorpayOrderId = razorpay_order_id;
@@ -213,7 +204,7 @@ const verifyPayment = async (req, res) => {
       success: true,
       message: 'Payment successful! Plan activated.',
       plan: {
-        id: plan.id,
+        id: planType,
         name: plan.name,
         monthlyLimit: plan.monthlyLimit
       },
@@ -242,7 +233,7 @@ const verifyPayment = async (req, res) => {
 const getSubscriptionStatus = async (req, res) => {
   try {
     const user = req.user;
-    const plan = PLANS[user.plan] || PLANS.free;
+    const plan = config.plans[user.plan] || config.plans.free;
 
     return res.status(200).json({
       success: true,
@@ -253,6 +244,9 @@ const getSubscriptionStatus = async (req, res) => {
         : null,
       monthlyLimit: plan.monthlyLimit,
       perMinute: plan.perMinute,
+      platformLimit: plan.platformLimit === Infinity ? null : plan.platformLimit,
+      storageMB: plan.storageMB,
+      hasWatermark: plan.hasWatermark,
       razorpayPaymentId: user.razorpayPaymentId || null
     });
 
@@ -291,6 +285,7 @@ const cancelSubscription = async (req, res) => {
     user.razorpayPaymentId = null;
     user.subscriptionCurrentPeriodEnd = null;
     user.planExpiresAt = null;
+    user.extraStorageMB = 0; // Reset extra storage
     
     await user.save();
 
@@ -347,11 +342,9 @@ const handleWebhook = async (req, res) => {
 
     switch (eventType) {
       case 'payment.captured':
-        // Payment successful - already handled in verifyPayment
         break;
         
       case 'payment.failed':
-        // Handle failed payment
         logger.warn('Payment failed', { 
           paymentId: event.payment?.entity?.id 
         });
@@ -364,7 +357,6 @@ const handleWebhook = async (req, res) => {
         break;
         
       case 'subscription.cancelled':
-        // Handle subscription cancellation
         const subscriptionId = event.subscription?.entity?.id;
         if (subscriptionId) {
           await User.updateOne(
@@ -372,7 +364,8 @@ const handleWebhook = async (req, res) => {
             { 
               plan: 'free',
               razorpaySubscriptionStatus: 'canceled',
-              subscriptionStatus: 'canceled'
+              subscriptionStatus: 'canceled',
+              extraStorageMB: 0
             }
           );
         }
@@ -390,6 +383,10 @@ const handleWebhook = async (req, res) => {
   }
 };
 
+// Plan order for sorting / comparison
+const PLAN_ORDER = { free: 0, starter: 1, pro: 2, business: 3 };
+const PLAN_ICONS = { free: 'zap', starter: 'rocket', pro: 'crown', business: 'sparkles' };
+
 module.exports = {
   getPlans,
   createOrder,
@@ -397,32 +394,39 @@ module.exports = {
   getSubscriptionStatus,
   cancelSubscription,
   handleWebhook,
-  PLANS,
+
   getUsage: async (req, res) => {
     try {
       const user = req.user;
-      const plan = PLANS[user.plan] || PLANS.free;
+      const plan = config.plans[user.plan] || config.plans.free;
+      const storageInfo = user.getStorageInfo();
       
+      // Count connected platforms
+      const platformsConnected = await BusinessConnection.countDocuments({
+        userId: user._id,
+        isActive: true
+      });
+
       return res.status(200).json({
         success: true,
         aiRepliesUsed: user.monthlyUsage?.count || 0,
         aiRepliesLimit: plan.monthlyLimit,
-        platformsConnected: 0,
-        platformsLimit: null,
-        storageUsedGb: 0,
-        storageLimitGb: 10
+        platformsConnected,
+        platformsLimit: plan.platformLimit === Infinity ? null : plan.platformLimit,
+        storageUsedMB: storageInfo.usedMB,
+        storageLimitMB: storageInfo.totalLimitMB,
+        storagePercentUsed: storageInfo.percentUsed,
+        canBuyExtraStorage: plan.canBuyExtraStorage,
+        hasWatermark: plan.hasWatermark,
       });
     } catch (error) {
       logger.error('Failed to get usage', { error: error.message });
       return res.status(500).json({ success: false, error: 'Failed to get usage' });
     }
   },
+
   getInvoices: async (req, res) => {
     try {
-      const user = req.user;
-      
-      // In a real app, you'd have an Invoice model
-      // For now, return empty array
       return res.status(200).json({
         success: true,
         invoices: []
@@ -432,37 +436,51 @@ module.exports = {
       return res.status(500).json({ success: false, error: 'Failed to get invoices' });
     }
   },
+
   // Get full billing info for frontend
   getBillingInfo: async (req, res) => {
     try {
       const user = req.user;
-      const plan = PLANS[user.plan] || PLANS.free;
+      const userPlan = config.plans[user.plan] || config.plans.free;
+      const storageInfo = user.getStorageInfo();
 
-      // Format plan for frontend
+      // Count connected platforms
+      const platformsConnected = await BusinessConnection.countDocuments({
+        userId: user._id,
+        isActive: true
+      });
+
+      // Format current plan for frontend
       const currentPlan = {
-        id: plan.id,
-        name: plan.name,
-        price: plan.price === 0 ? '₹0' : `₹${plan.price / 100}`,
+        id: user.plan,
+        name: userPlan.name,
+        price: userPlan.priceINR === 0 ? '₹0' : `₹${userPlan.priceINR}`,
         period: '/mo',
-        repliesPerDay: formatPlanReplies(plan.monthlyLimit),
-        features: getPlanFeatures(plan.id),
-        icon: getPlanIcon(plan.id),
-        popular: plan.id === 'pro',
-        order: getPlanOrder(plan.id)
+        repliesPerDay: `${userPlan.monthlyLimit.toLocaleString()}/month`,
+        features: userPlan.features,
+        icon: PLAN_ICONS[user.plan] || 'zap',
+        popular: user.plan === 'starter',
+        order: PLAN_ORDER[user.plan] || 0,
       };
 
-      // All plans
-      const allPlans = Object.entries(PLANS).map(([key, p]) => ({
-        id: p.id,
-        name: p.name,
-        price: p.price === 0 ? '₹0' : `₹${p.price / 100}`,
-        period: '/mo',
-        repliesPerDay: formatPlanReplies(p.monthlyLimit),
-        features: getPlanFeatures(p.id),
-        icon: getPlanIcon(p.id),
-        popular: p.id === 'pro',
-        order: getPlanOrder(p.id)
-      }));
+      // All plans for comparison
+      const allPlans = config.validPlans.map(key => {
+        const p = config.plans[key];
+        return {
+          id: key,
+          name: p.name,
+          price: p.priceINR === 0 ? '₹0' : `₹${p.priceINR}`,
+          period: '/mo',
+          repliesPerDay: `${p.monthlyLimit.toLocaleString()}/month`,
+          features: p.features,
+          icon: PLAN_ICONS[key] || 'zap',
+          popular: key === 'starter',
+          order: PLAN_ORDER[key] || 0,
+          platformLimit: p.platformLimit === Infinity ? null : p.platformLimit,
+          storageMB: p.storageMB,
+          hasWatermark: p.hasWatermark,
+        };
+      });
 
       const nextBillingDate = user.subscriptionCurrentPeriodEnd 
         ? new Date(user.subscriptionCurrentPeriodEnd).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
@@ -475,11 +493,13 @@ module.exports = {
         nextBillingDate,
         usage: {
           aiRepliesUsed: user.monthlyUsage?.count || 0,
-          aiRepliesLimit: plan.monthlyLimit,
-          platformsConnected: 0,
-          platformsLimit: null,
-          storageUsedGb: 0,
-          storageLimitGb: 10
+          aiRepliesLimit: userPlan.monthlyLimit,
+          platformsConnected,
+          platformsLimit: userPlan.platformLimit === Infinity ? null : userPlan.platformLimit,
+          storageUsedMB: storageInfo.usedMB,
+          storageLimitMB: storageInfo.totalLimitMB,
+          storagePercentUsed: storageInfo.percentUsed,
+          canBuyExtraStorage: userPlan.canBuyExtraStorage,
         },
         invoices: []
       });
@@ -489,35 +509,3 @@ module.exports = {
     }
   }
 };
-
-// Helper functions
-function getPlanFeatures(planId) {
-  const features = {
-    free: ['30 AI replies/month', '1 platform', 'Basic analytics', 'Email support'],
-    starter: ['300 AI replies/month', '3 platforms', 'Advanced analytics', 'Priority support'],
-    pro: ['1,500 AI replies/month', 'Unlimited platforms', 'Full analytics suite', 'Dedicated support', 'Custom templates'],
-    business: ['5,000 AI replies/month', 'Unlimited platforms', 'White-label reports', 'API access', 'Account manager']
-  };
-  return features[planId] || features.free;
-}
-
-function getPlanIcon(planId) {
-  const icons = {
-    free: 'zap',
-    starter: 'rocket',
-    pro: 'crown',
-    business: 'sparkles'
-  };
-  return icons[planId] || 'zap';
-}
-
-function getPlanOrder(planId) {
-  if (planId === 'free') return 0;
-  if (planId === 'starter') return 1;
-  if (planId === 'pro') return 2;
-  return 3;
-}
-
-function formatPlanReplies(monthlyLimit) {
-  return `${monthlyLimit.toLocaleString()}/month`;
-}

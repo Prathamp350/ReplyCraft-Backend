@@ -59,6 +59,16 @@ const userSchema = new mongoose.Schema({
       default: Date.now
     }
   },
+  // Storage tracking
+  storageUsedBytes: {
+    type: Number,
+    default: 0
+  },
+  // Extra storage purchased (in MB, on top of plan's included storage)
+  extraStorageMB: {
+    type: Number,
+    default: 0
+  },
   isActive: {
     type: Boolean,
     default: true
@@ -161,7 +171,18 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Check and reset monthly usage
+// ---- Plan helpers ----
+
+/**
+ * Get this user's plan config from centralized config
+ */
+userSchema.methods.getPlanConfig = function() {
+  return config.plans[this.plan] || config.plans.free;
+};
+
+/**
+ * Check and reset monthly usage
+ */
 userSchema.methods.checkMonthlyLimit = function() {
   const now = new Date();
   const lastReset = new Date(this.monthlyUsage.lastReset);
@@ -172,14 +193,14 @@ userSchema.methods.checkMonthlyLimit = function() {
     this.monthlyUsage.lastReset = now;
   }
   
-  const planLimits = config.plans[this.plan] || config.plans.free;
-  const remaining = planLimits.monthlyLimit - this.monthlyUsage.count;
+  const planConfig = this.getPlanConfig();
+  const remaining = planConfig.monthlyLimit - this.monthlyUsage.count;
   
   return {
     used: this.monthlyUsage.count,
-    limit: planLimits.monthlyLimit,
+    limit: planConfig.monthlyLimit,
     remaining: Math.max(0, remaining),
-    exceeded: this.monthlyUsage.count >= planLimits.monthlyLimit
+    exceeded: this.monthlyUsage.count >= planConfig.monthlyLimit
   };
 };
 
@@ -196,6 +217,50 @@ userSchema.methods.resetMonthlyUsage = function() {
   this.monthlyUsage.lastReset = new Date();
 };
 
+// ---- Storage helpers ----
+
+/**
+ * Get storage info for this user
+ */
+userSchema.methods.getStorageInfo = function() {
+  const planConfig = this.getPlanConfig();
+  const baseLimitMB = planConfig.storageMB;
+  const totalLimitMB = baseLimitMB + (this.extraStorageMB || 0);
+  const usedMB = Math.round((this.storageUsedBytes || 0) / (1024 * 1024) * 100) / 100;
+  
+  return {
+    usedBytes: this.storageUsedBytes || 0,
+    usedMB: usedMB,
+    baseLimitMB: baseLimitMB,
+    extraMB: this.extraStorageMB || 0,
+    totalLimitMB: totalLimitMB,
+    remainingMB: Math.max(0, totalLimitMB - usedMB),
+    exceeded: usedMB >= totalLimitMB,
+    canBuyExtra: planConfig.canBuyExtraStorage,
+    percentUsed: totalLimitMB > 0 ? Math.min(100, Math.round((usedMB / totalLimitMB) * 100)) : 0
+  };
+};
+
+/**
+ * Add bytes to storage usage (call after generating/storing a reply)
+ */
+userSchema.methods.addStorageUsage = async function(bytes) {
+  this.storageUsedBytes = (this.storageUsedBytes || 0) + bytes;
+  await this.save();
+};
+
+// ---- Platform helpers ----
+
+/**
+ * Check if user can connect another platform
+ */
+userSchema.methods.getPlatformLimit = function() {
+  const planConfig = this.getPlanConfig();
+  return planConfig.platformLimit;
+};
+
+// ---- Subscription helpers ----
+
 /**
  * Check and sync subscription status
  * Downgrade to free if subscription has expired
@@ -205,13 +270,14 @@ userSchema.methods.syncSubscriptionStatus = async function() {
   
   // Check if subscription has expired
   if (this.subscriptionCurrentPeriodEnd && this.subscriptionCurrentPeriodEnd < now) {
-    // Subscription has expired
     if (this.plan !== 'free') {
       console.log(`[Subscription] Expiring subscription for user ${this._id}, downgrading to free`);
       
       this.plan = 'free';
       this.subscriptionStatus = 'expired';
       this.stripeSubscriptionId = null;
+      // Reset extra storage on downgrade
+      this.extraStorageMB = 0;
       await this.save();
       
       return {
@@ -224,11 +290,11 @@ userSchema.methods.syncSubscriptionStatus = async function() {
   
   // Check if subscription is inactive due to payment failure
   if (this.subscriptionStatus === 'past_due' || this.subscriptionStatus === 'unpaid') {
-    // Downgrade to free until payment is resolved
     if (this.plan !== 'free') {
       console.log(`[Subscription] Payment issue for user ${this._id}, downgrading to free`);
       
       this.plan = 'free';
+      this.extraStorageMB = 0;
       await this.save();
       
       return {
@@ -250,7 +316,7 @@ userSchema.methods.syncSubscriptionStatus = async function() {
  * Get subscription info for API response
  */
 userSchema.methods.getSubscriptionInfo = function() {
-  const planConfig = config.plans[this.plan] || config.plans.free;
+  const planConfig = this.getPlanConfig();
   
   return {
     plan: this.plan,
@@ -259,7 +325,10 @@ userSchema.methods.getSubscriptionInfo = function() {
       ? Math.floor(this.subscriptionCurrentPeriodEnd.getTime() / 1000) 
       : null,
     monthlyLimit: planConfig.monthlyLimit,
-    perMinute: planConfig.perMinute
+    perMinute: planConfig.perMinute,
+    platformLimit: planConfig.platformLimit === Infinity ? null : planConfig.platformLimit,
+    storageMB: planConfig.storageMB,
+    hasWatermark: planConfig.hasWatermark,
   };
 };
 

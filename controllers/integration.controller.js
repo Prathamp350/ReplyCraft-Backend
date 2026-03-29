@@ -26,6 +26,23 @@ const connectGoogle = async (req, res) => {
   try {
     const { code, redirectUri } = req.body;
     const userId = req.userId;
+    const user = req.user;
+
+    // Check platform limit before allowing new connection
+    const planConfig = user.getPlanConfig();
+    if (planConfig.platformLimit !== Infinity) {
+      const activeCount = await BusinessConnection.countDocuments({ userId, isActive: true });
+      if (activeCount >= planConfig.platformLimit) {
+        return res.status(403).json({
+          success: false,
+          error: `Your ${planConfig.name} plan supports up to ${planConfig.platformLimit} platform(s). Upgrade to connect more.`,
+          code: 'PLATFORM_LIMIT_REACHED',
+          connected: activeCount,
+          limit: planConfig.platformLimit,
+          upgradeUrl: '/dashboard/upgrade'
+        });
+      }
+    }
 
     if (!code) {
       return res.status(400).json({
@@ -189,6 +206,7 @@ const toggleIntegration = async (req, res) => {
     const { id } = req.params; // Using the platform name as the ID
     const { connect, businessEmail } = req.body;
     const userId = req.userId;
+    const user = req.user;
 
     let connection = await BusinessConnection.findOne({ userId, platform: id });
 
@@ -199,6 +217,24 @@ const toggleIntegration = async (req, res) => {
         await connection.save();
       }
       return res.status(200).json({ success: true, message: 'Disconnected successfully' });
+    }
+
+    // Check platform limit before connecting
+    const planConfig = user.getPlanConfig();
+    if (planConfig.platformLimit !== Infinity) {
+      const activeCount = await BusinessConnection.countDocuments({ userId, isActive: true });
+      // Only check if this would be a NEW active connection
+      const wouldBeNew = !connection || !connection.isActive;
+      if (wouldBeNew && activeCount >= planConfig.platformLimit) {
+        return res.status(403).json({
+          success: false,
+          error: `Your ${planConfig.name} plan supports up to ${planConfig.platformLimit} platform(s). Upgrade to connect more.`,
+          code: 'PLATFORM_LIMIT_REACHED',
+          connected: activeCount,
+          limit: planConfig.platformLimit,
+          upgradeUrl: '/dashboard/upgrade'
+        });
+      }
     }
 
     // Connect Flow
@@ -216,7 +252,6 @@ const toggleIntegration = async (req, res) => {
     }
 
     // New Connection: Attempt auto-discovery
-    const user = await User.findById(userId);
     const searchTerm = user.businessName || user.name || 'Business';
     const searchLocation = user.city || user.country || '';
 
