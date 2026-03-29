@@ -5,7 +5,7 @@
  */
 
 const jwt = require('jsonwebtoken');
-const config = require('../config/config');
+const baseConfig = require('../config/config');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 
@@ -109,7 +109,7 @@ const requirePremium = (req, res, next) => {
   }
 
   // All paid plans from centralized config
-  const paidPlans = config.validPlans.filter(p => p !== 'free');
+  const paidPlans = baseConfig.validPlans.filter(p => p !== 'free');
   
   if (!paidPlans.includes(user.plan)) {
     return res.status(403).json({

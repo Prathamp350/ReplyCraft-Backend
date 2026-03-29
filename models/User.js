@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
-const config = require('../config/config');
+const { getConfig } = require('../services/configManager');
+const baseConfig = require('../config/config');
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -46,8 +47,8 @@ const userSchema = new mongoose.Schema({
   },
   plan: {
     type: String,
-    enum: config.validPlans,
-    default: config.defaultPlan
+    enum: baseConfig.validPlans,
+    default: baseConfig.defaultPlan
   },
   monthlyUsage: {
     count: {
@@ -79,6 +80,10 @@ const userSchema = new mongoose.Schema({
     default: null
   },
   stripeSubscriptionId: {
+    type: String,
+    default: null
+  },
+  appliedPromoCode: {
     type: String,
     default: null
   },
@@ -177,6 +182,7 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
  * Get this user's plan config from centralized config
  */
 userSchema.methods.getPlanConfig = function() {
+  const config = getConfig();
   return config.plans[this.plan] || config.plans.free;
 };
 

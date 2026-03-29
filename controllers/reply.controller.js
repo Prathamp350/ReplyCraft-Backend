@@ -1,7 +1,7 @@
 const ollamaService = require('../services/ollama.service');
 const promptService = require('../services/prompt.service');
 const cleanReplyUtil = require('../utils/cleanReply');
-const config = require('../config/config');
+const { getConfig } = require('../services/configManager');
 const RestaurantProfile = require('../models/RestaurantProfile');
 const logger = require('../utils/logger');
 const { queueLimitReachedEmail } = require('../queues/email.queue');
@@ -117,7 +117,7 @@ const generateReply = async (req, res) => {
     // Append watermark for Free plan users
     const planConfig = user.getPlanConfig();
     if (planConfig.hasWatermark) {
-      reply = reply + config.watermarkText;
+      reply = reply + getConfig().watermarkText;
     }
 
     // Increment usage counter

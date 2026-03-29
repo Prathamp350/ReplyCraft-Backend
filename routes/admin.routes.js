@@ -15,4 +15,15 @@ router.get('/staff', authorizeRoles('superadmin', 'admin'), adminController.list
 // DELETE /api/admin/staff/:id - Deactivate staff account
 router.delete('/staff/:id', authorizeRoles('superadmin', 'admin'), adminController.deleteStaff);
 
+// --- Admin Subsystem ---
+router.post('/promocodes', authorizeRoles('superadmin', 'admin'), adminController.createPromo);
+router.get('/promocodes', authorizeRoles('superadmin', 'admin'), adminController.listPromos);
+router.delete('/promocodes/:id', authorizeRoles('superadmin', 'admin'), adminController.deletePromo);
+
+router.get('/plans', authorizeRoles('superadmin', 'admin'), adminController.getPlans);
+router.put('/plans/:planId', authorizeRoles('superadmin'), adminController.updatePlan);
+
+router.get('/users', authorizeRoles('superadmin', 'admin', 'support'), adminController.getUsers);
+router.get('/stats/live', authorizeRoles('superadmin', 'admin'), adminController.getStats);
+
 module.exports = router;

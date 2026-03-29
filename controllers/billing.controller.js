@@ -7,7 +7,10 @@
 const Razorpay = require('razorpay');
 const User = require('../models/User');
 const BusinessConnection = require('../models/BusinessConnection');
-const config = require('../config/config');
+const PromoCode = require('../models/PromoCode');
+const PromoCode = require('../models/PromoCode');
+const baseConfig = require('../config/config');
+const { getConfig } = require('../services/configManager');
 const logger = require('../utils/logger');
 
 // Initialize Razorpay
@@ -18,7 +21,7 @@ const razorpay = new Razorpay({
 
 // Derive Razorpay plan config from centralized config
 function getRazorpayPlan(planId) {
-  const plan = config.plans[planId];
+  const plan = getConfig().plans[planId];
   if (!plan) return null;
   return {
     id: planId,
@@ -38,8 +41,8 @@ function getRazorpayPlan(planId) {
  */
 const getPlans = async (req, res) => {
   try {
-    const plans = config.validPlans.map(key => {
-      const plan = config.plans[key];
+    const plans = baseConfig.validPlans.map(key => {
+      const plan = getConfig().plans[key];
       return {
         id: key,
         name: plan.name,
@@ -70,14 +73,14 @@ const getPlans = async (req, res) => {
  */
 const createOrder = async (req, res) => {
   try {
-    const { plan: planType } = req.body;
+    const { plan: planType, promoCode } = req.body;
     const user = req.user;
 
     // Validate plan
-    if (!planType || !config.plans[planType]) {
+    if (!planType || !getConfig().plans[planType]) {
       return res.status(400).json({
         success: false,
-        error: `Invalid plan. Choose from: ${config.validPlans.join(', ')}`
+        error: `Invalid plan. Choose from: ${baseConfig.validPlans.join(', ')}`
       });
     }
 
@@ -92,14 +95,33 @@ const createOrder = async (req, res) => {
     }
 
     // Create Razorpay order
+        let finalPricePaise = rpPlan.price;
+    let appliedPromo = null;
+
+    if (promoCode) {
+      const promo = await PromoCode.findOne({ code: promoCode.trim().toUpperCase() });
+      if (!promo || !promo.isValid()) {
+        return res.status(400).json({ success: false, error: 'Invalid or expired promo code.' });
+      }
+      if (promo.applicablePlan !== 'all' && promo.applicablePlan !== planType) {
+        return res.status(400).json({ success: false, error: `Promo applies only to ${promo.applicablePlan} plan.` });
+      }
+
+      finalPricePaise = Math.round(finalPricePaise * ((100 - promo.discountPercent) / 100));
+      if (finalPricePaise < 100) finalPricePaise = 100; // Razorpay min 1 INR
+      appliedPromo = promo.code;
+    }
+
+    // Create Razorpay order
     const options = {
-      amount: rpPlan.price, // Amount in paise
+      amount: finalPricePaise, // Amount in paise
       currency: 'INR',
       receipt: `receipt_${user._id}_${Date.now()}`,
       notes: {
         userId: user._id.toString(),
         plan: planType,
-        email: user.email
+        email: user.email,
+        promoCode: appliedPromo || ''
       }
     };
 
@@ -109,7 +131,7 @@ const createOrder = async (req, res) => {
       orderId: order.id,
       userId: user._id,
       plan: planType,
-      amount: rpPlan.price
+      amount: finalPricePaise
     });
 
     return res.status(200).json({
@@ -143,7 +165,7 @@ const createOrder = async (req, res) => {
  */
 const verifyPayment = async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan: planType } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan: planType, promoCode } = req.body;
     const user = req.user;
 
     // Validate required fields
@@ -155,7 +177,7 @@ const verifyPayment = async (req, res) => {
     }
 
     // Validate plan
-    if (!planType || !config.plans[planType]) {
+    if (!planType || !getConfig().plans[planType]) {
       return res.status(400).json({
         success: false,
         error: 'Invalid plan'
@@ -182,7 +204,7 @@ const verifyPayment = async (req, res) => {
     }
 
     // Payment verified - update user plan
-    const plan = config.plans[planType];
+    const plan = getConfig().plans[planType];
     
     user.plan = planType;
     user.razorpayOrderId = razorpay_order_id;
@@ -191,6 +213,16 @@ const verifyPayment = async (req, res) => {
     user.subscriptionStatus = 'active';
     user.subscriptionCurrentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
     user.planExpiresAt = user.subscriptionCurrentPeriodEnd;
+    
+    // Increment promo usage if appended
+    if (promoCode) {
+      const promo = await PromoCode.findOne({ code: promoCode.trim().toUpperCase() });
+      if (promo) {
+        promo.currentUses += 1;
+        await promo.save();
+        user.appliedPromoCode = promo.code;
+      }
+    }
     
     await user.save();
 
@@ -233,7 +265,7 @@ const verifyPayment = async (req, res) => {
 const getSubscriptionStatus = async (req, res) => {
   try {
     const user = req.user;
-    const plan = config.plans[user.plan] || config.plans.free;
+    const plan = getConfig().plans[user.plan] || getConfig().plans.free;
 
     return res.status(200).json({
       success: true,
@@ -395,10 +427,36 @@ module.exports = {
   cancelSubscription,
   handleWebhook,
 
+  validatePromo: async (req, res) => {
+    try {
+      const { code, plan } = req.body;
+      if (!code) return res.status(400).json({ success: false, error: 'Promo code required' });
+
+      const promo = await PromoCode.findOne({ code: code.trim().toUpperCase() });
+      if (!promo) return res.status(404).json({ success: false, error: 'Invalid Promo Code' });
+      if (!promo.isValid()) return res.status(400).json({ success: false, error: 'Promo code is expired or maximum uses reached.' });
+      
+      if (plan && promo.applicablePlan !== 'all' && promo.applicablePlan !== plan) {
+        return res.status(400).json({ success: false, error: `This promo applies to the ${promo.applicablePlan} plan only.` });
+      }
+
+      return res.status(200).json({
+        success: true,
+        discountPercent: promo.discountPercent,
+        message: 'Promo applied successfully!'
+      });
+    } catch (error) {
+      logger.error('Validate Promo Error', { error: error.message });
+      return res.status(500).json({ success: false, error: 'Promo validation failed' });
+    }
+  },
+  cancelSubscription,
+  handleWebhook,
+
   getUsage: async (req, res) => {
     try {
       const user = req.user;
-      const plan = config.plans[user.plan] || config.plans.free;
+      const plan = getConfig().plans[user.plan] || getConfig().plans.free;
       const storageInfo = user.getStorageInfo();
       
       // Count connected platforms
@@ -441,7 +499,7 @@ module.exports = {
   getBillingInfo: async (req, res) => {
     try {
       const user = req.user;
-      const userPlan = config.plans[user.plan] || config.plans.free;
+      const userPlan = getConfig().plans[user.plan] || getConfig().plans.free;
       const storageInfo = user.getStorageInfo();
 
       // Count connected platforms
@@ -464,8 +522,8 @@ module.exports = {
       };
 
       // All plans for comparison
-      const allPlans = config.validPlans.map(key => {
-        const p = config.plans[key];
+      const allPlans = baseConfig.validPlans.map(key => {
+        const p = getConfig().plans[key];
         return {
           id: key,
           name: p.name,

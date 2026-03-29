@@ -33,6 +33,7 @@ const { validateEmailConfig } = require('./config/emailValidator');
 const { syncAllSubscriptions } = require('./controllers/webhook.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { bullBoardRouter } = require('./config/bullBoard');
+const { loadConfig } = require('./services/configManager');
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:8080',
   'http://localhost:3000',
@@ -215,6 +216,7 @@ const startServer = async () => {
   try {
     await mongoose.connect(config.mongodb.uri);
     logger.info('Connected to MongoDB');
+    await loadConfig();
     
     // Sync subscriptions on startup (downgrade expired plans)
     await syncAllSubscriptions();

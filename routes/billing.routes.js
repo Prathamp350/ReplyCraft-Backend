@@ -10,6 +10,7 @@ const {
   getPlans,
   createOrder,
   verifyPayment,
+  validatePromo,
   getSubscriptionStatus,
   cancelSubscription,
   handleWebhook,
@@ -28,6 +29,7 @@ router.get('/subscription', authenticate, getSubscriptionStatus);
 router.get('/usage', authenticate, getUsage);
 router.get('/invoices', authenticate, getInvoices);
 router.post('/create-order', authenticate, createOrder);
+router.post('/promo/validate', authenticate, validatePromo);
 router.post('/verify-payment', authenticate, verifyPayment);
 router.post('/cancel', authenticate, cancelSubscription);
 

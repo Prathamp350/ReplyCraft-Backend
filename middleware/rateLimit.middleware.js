@@ -1,5 +1,6 @@
 const rateLimit = require('express-rate-limit');
-const config = require('../config/config');
+const { getConfig } = require('../services/configManager');
+const baseConfig = require('../config/config');
 
 // In-memory store for per-minute rate limiting
 const minuteRequestCounts = new Map();
@@ -11,8 +12,8 @@ const createPlanRateLimiter = () => {
   return rateLimit({
     windowMs: 60 * 1000, // 1 minute
     max: (req) => {
-      const plan = req.user?.plan || config.defaultPlan;
-      return config.plans[plan]?.perMinute || config.plans.free.perMinute;
+      const plan = req.user?.plan || baseConfig.defaultPlan;
+      return getConfig().plans[plan]?.perMinute || getConfig().plans.free.perMinute;
     },
     message: {
       success: false,
@@ -49,8 +50,8 @@ const customRateLimiter = (req, res, next) => {
   // Filter out old requests
   requestTimes = requestTimes.filter(timestamp => timestamp > windowStart);
   
-  const plan = req.user?.plan || config.defaultPlan;
-  const limit = config.plans[plan]?.perMinute || config.plans.free.perMinute;
+  const plan = req.user?.plan || baseConfig.defaultPlan;
+  const limit = getConfig().plans[plan]?.perMinute || getConfig().plans.free.perMinute;
   
   // Check if limit exceeded
   if (requestTimes.length >= limit) {

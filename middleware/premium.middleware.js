@@ -6,10 +6,11 @@
 
 const User = require('../models/User');
 const BusinessConnection = require('../models/BusinessConnection');
-const config = require('../config/config');
+const baseConfig = require('../config/config');
+const { getConfig } = require('../services/configManager');
 const logger = require('../utils/logger');
 
-const PREMIUM_PLANS = config.validPlans.filter(p => p !== 'free');
+const PREMIUM_PLANS = baseConfig.validPlans.filter(p => p !== 'free');
 
 /**
  * Middleware to check if user has premium subscription
@@ -70,7 +71,7 @@ const requirePlan = (minPlan) => {
     if (userOrder < minOrder) {
       return res.status(403).json({
         success: false,
-        error: `This feature requires the ${config.plans[minPlan]?.name || minPlan} plan or higher.`,
+        error: `This feature requires the ${getConfig().plans[minPlan]?.name || minPlan} plan or higher.`,
         code: 'PLAN_REQUIRED',
         currentPlan: user.plan,
         requiredPlan: minPlan,
