@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your ReplyCraft Plan is Active</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#162033;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f7fb;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;background:#ffffff;border-radius:20px;overflow:hidden;">
+          <tr>
+            <td style="background:linear-gradient(135deg,#2b59ff,#6d4dff);padding:28px 32px;color:#ffffff;">
+              <div style="font-size:14px;letter-spacing:0.12em;text-transform:uppercase;opacity:0.85;">ReplyCraft Billing</div>
+              <h1 style="margin:12px 0 0;font-size:28px;line-height:1.2;">Your {{planName}} plan is now active</h1>
+              <p style="margin:12px 0 0;font-size:15px;line-height:1.7;opacity:0.92;">
+                Thanks, {{name}}. Your payment was received successfully and your account has been upgraded.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0 12px;">
+                <tr>
+                  <td style="font-size:13px;color:#657089;">Invoice</td>
+                  <td align="right" style="font-size:14px;font-weight:700;color:#162033;">{{invoiceNumber}}</td>
+                </tr>
+                <tr>
+                  <td style="font-size:13px;color:#657089;">Order ID</td>
+                  <td align="right" style="font-size:14px;font-weight:700;color:#162033;">{{orderId}}</td>
+                </tr>
+                <tr>
+                  <td style="font-size:13px;color:#657089;">Payment ID</td>
+                  <td align="right" style="font-size:14px;font-weight:700;color:#162033;">{{paymentId}}</td>
+                </tr>
+                <tr>
+                  <td style="font-size:13px;color:#657089;">Billing cycle</td>
+                  <td align="right" style="font-size:14px;font-weight:700;color:#162033;">{{billingLabel}}</td>
+                </tr>
+                <tr>
+                  <td style="font-size:13px;color:#657089;">Amount paid</td>
+                  <td align="right" style="font-size:20px;font-weight:800;color:#162033;">{{amountPaid}}</td>
+                </tr>
+              </table>
+
+              <div style="margin-top:28px;padding:20px;border:1px solid #e7ebf3;border-radius:16px;background:#f9fbff;">
+                <div style="font-size:14px;font-weight:700;color:#162033;margin-bottom:10px;">What changed on your account</div>
+                <div style="font-size:14px;line-height:1.8;color:#42506a;">
+                  <div>Plan: {{planName}}</div>
+                  <div>Usage allowance: {{monthlyLimit}}</div>
+                  <div>Storage included: {{storage}}</div>
+                  <div>Plan valid until: {{planEndsAt}}</div>
+                </div>
+              </div>
+
+              <div style="margin-top:28px;text-align:center;">
+                <a href="{{frontendUrl}}/billing" style="display:inline-block;background:#162033;color:#ffffff;text-decoration:none;padding:14px 24px;border-radius:12px;font-size:14px;font-weight:700;">
+                  Open Billing
+                </a>
+              </div>
+
+              <p style="margin:28px 0 0;font-size:13px;line-height:1.8;color:#657089;text-align:center;">
+                Keep this email for your records. You can also download the invoice anytime from your billing page.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

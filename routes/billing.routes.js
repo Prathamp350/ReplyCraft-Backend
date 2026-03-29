@@ -17,7 +17,8 @@ const {
   handleWebhook,
   getInvoices,
   getUsage,
-  getBillingInfo
+  getBillingInfo,
+  downloadInvoice
 } = require('../controllers/billing.controller');
 
 // Webhook - no auth required
@@ -30,6 +31,7 @@ router.get('/', authenticate, getBillingInfo);
 router.get('/subscription', authenticate, getSubscriptionStatus);
 router.get('/usage', authenticate, getUsage);
 router.get('/invoices', authenticate, getInvoices);
+router.get('/invoices/:id/download', authenticate, downloadInvoice);
 router.post('/create-order', authenticate, createOrder);
 router.post('/promo/validate', authenticate, validatePromo);
 router.post('/verify-payment', authenticate, verifyPayment);

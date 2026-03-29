@@ -64,6 +64,7 @@ function getPriorityForType(type) {
     welcome: 2,
     limitReached: 3,
     integrationConnected: 2,
+    planUpgrade: 1,
     passwordReset: 1,
     test: 1,
     otp: 1
@@ -175,6 +176,13 @@ async function queueOtpEmail(email, name, otp, reqDetails = {}, reason = 'login'
   });
 }
 
+async function queuePlanUpgradeEmail(data) {
+  return queueEmail('planUpgrade', {
+    type: 'planUpgrade',
+    ...data,
+  });
+}
+
 /**
  * Get email queue stats
  */
@@ -191,5 +199,6 @@ module.exports = {
   queueIntegrationConnectedEmail,
   queueTestEmail,
   queueOtpEmail,
+  queuePlanUpgradeEmail,
   getEmailQueueStats
 };

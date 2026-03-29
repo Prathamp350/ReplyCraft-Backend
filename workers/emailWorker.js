@@ -168,6 +168,10 @@ async function processEmailJob(job) {
       subject = `${data.platform || 'Integration'} Connected! ✅`;
       templateName = 'integrationConnected';
       break;
+    case 'planUpgrade':
+      subject = `Your ReplyCraft ${data.planName || 'Plan'} Plan is Active`;
+      templateName = 'planUpgrade';
+      break;
     case 'test':
       subject = 'ReplyCraft Test Email ✅';
       templateName = 'welcomeEmail';

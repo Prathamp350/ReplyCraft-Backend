@@ -10,10 +10,12 @@ const User = require('../models/User');
 const BusinessConnection = require('../models/BusinessConnection');
 const PromoCode = require('../models/PromoCode');
 const CheckoutQuote = require('../models/CheckoutQuote');
+const Invoice = require('../models/Invoice');
 
 const baseConfig = require('../config/config');
 const { getConfig } = require('../services/configManager');
 const logger = require('../utils/logger');
+const { queuePlanUpgradeEmail } = require('../queues/email.queue');
 
 const isPlaceholderValue = (value = '') =>
   !value || value.startsWith('your_') || value.includes('change_me');
@@ -40,6 +42,73 @@ const getGatewayErrorDetails = (error) => {
     field: gatewayPayload?.field || null,
     metadata: gatewayPayload,
   };
+};
+
+const formatInvoiceAmount = (amountPaise, currency = 'INR') => {
+  const amount = Number(amountPaise || 0) / 100;
+
+  if (currency === 'INR') {
+    return `Rs. ${amount.toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }
+
+  return `${currency} ${amount.toFixed(2)}`;
+};
+
+const formatPlanEndDate = (date) =>
+  new Date(date).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+const buildInvoiceDownloadUrl = (req, invoiceId) =>
+  `${req.protocol}://${req.get('host')}/api/billing/invoices/${invoiceId}/download`;
+
+const createInvoiceNumber = () =>
+  `RC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+
+const buildInvoiceHtml = (invoice) => {
+  const paidDate = new Date(invoice.paidAt || invoice.createdAt);
+  const dateLabel = paidDate.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Invoice ${invoice.invoiceNumber}</title>
+</head>
+<body style="margin:0;padding:32px;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#162033;">
+  <div style="max-width:760px;margin:0 auto;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #e8edf6;">
+    <div style="padding:28px 32px;background:linear-gradient(135deg,#12203d,#355cff);color:#ffffff;">
+      <div style="font-size:14px;letter-spacing:0.12em;text-transform:uppercase;opacity:0.85;">ReplyCraft Invoice</div>
+      <h1 style="margin:12px 0 0;font-size:28px;">${invoice.invoiceNumber}</h1>
+      <p style="margin:10px 0 0;font-size:14px;line-height:1.7;opacity:0.92;">Paid on ${dateLabel}</p>
+    </div>
+    <div style="padding:32px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        <tr><td style="padding:10px 0;color:#657089;">Customer</td><td align="right" style="padding:10px 0;font-weight:700;">${invoice.customerName}</td></tr>
+        <tr><td style="padding:10px 0;color:#657089;">Email</td><td align="right" style="padding:10px 0;font-weight:700;">${invoice.customerEmail}</td></tr>
+        <tr><td style="padding:10px 0;color:#657089;">Order ID</td><td align="right" style="padding:10px 0;font-weight:700;">${invoice.orderId}</td></tr>
+        <tr><td style="padding:10px 0;color:#657089;">Payment ID</td><td align="right" style="padding:10px 0;font-weight:700;">${invoice.paymentId}</td></tr>
+        <tr><td style="padding:10px 0;color:#657089;">Plan</td><td align="right" style="padding:10px 0;font-weight:700;">${invoice.planName} (${invoice.billing})</td></tr>
+        <tr><td style="padding:10px 0;color:#657089;">Base amount</td><td align="right" style="padding:10px 0;font-weight:700;">${formatInvoiceAmount(invoice.baseAmountPaise, invoice.currency)}</td></tr>
+        <tr><td style="padding:10px 0;color:#657089;">Discount</td><td align="right" style="padding:10px 0;font-weight:700;">-${formatInvoiceAmount(invoice.discountAmountPaise, invoice.currency)}</td></tr>
+        <tr><td style="padding:16px 0 0;color:#162033;font-size:16px;font-weight:700;border-top:1px solid #e8edf6;">Total paid</td><td align="right" style="padding:16px 0 0;font-size:20px;font-weight:800;border-top:1px solid #e8edf6;">${formatInvoiceAmount(invoice.totalAmountPaise, invoice.currency)}</td></tr>
+      </table>
+    </div>
+  </div>
+</body>
+</html>`;
 };
 
 const assertRazorpayConfigured = () => {
@@ -456,6 +525,26 @@ const verifyPayment = async (req, res) => {
     
     await user.save();
 
+    const invoice = await Invoice.create({
+      userId: user._id,
+      invoiceNumber: createInvoiceNumber(),
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id,
+      planId: resolvedPlanType,
+      planName: plan.name,
+      billing: resolvedBilling,
+      status: 'paid',
+      currency: order.currency || 'INR',
+      baseAmountPaise: quote?.basePricePaise || order.amount,
+      discountAmountPaise: Math.max(0, (quote?.basePricePaise || order.amount) - expectedAmountPaise),
+      totalAmountPaise: expectedAmountPaise,
+      promoCode: resolvedPromoCode,
+      customerName: user.name,
+      customerEmail: user.email,
+      customerPhone: user.phoneNumber || null,
+      paidAt: new Date(),
+    });
+
     if (quote) {
       quote.status = 'used';
       quote.razorpayOrderId = razorpay_order_id;
@@ -466,7 +555,28 @@ const verifyPayment = async (req, res) => {
       userId: user._id,
       plan: resolvedPlanType,
       billing: resolvedBilling,
-      paymentId: razorpay_payment_id
+      paymentId: razorpay_payment_id,
+      invoiceNumber: invoice.invoiceNumber
+    });
+
+    queuePlanUpgradeEmail({
+      to: user.email,
+      name: user.name,
+      planName: plan.name,
+      invoiceNumber: invoice.invoiceNumber,
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id,
+      billingLabel: resolvedBilling === 'yearly' ? 'Yearly billing' : 'Monthly billing',
+      amountPaid: formatInvoiceAmount(invoice.totalAmountPaise, invoice.currency),
+      monthlyLimit: `${plan.monthlyLimit.toLocaleString()} replies / month`,
+      storage: `${plan.storageMB} MB included`,
+      planEndsAt: formatPlanEndDate(user.subscriptionCurrentPeriodEnd),
+    }).catch((queueError) => {
+      logger.error('Failed to queue plan upgrade email', {
+        error: queueError.message,
+        userId: user._id,
+        invoiceNumber: invoice.invoiceNumber
+      });
     });
 
     return res.status(200).json({
@@ -786,9 +896,25 @@ module.exports = {
 
   getInvoices: async (req, res) => {
     try {
+      const invoices = await Invoice.find({ userId: req.user._id })
+        .sort({ paidAt: -1, createdAt: -1 })
+        .limit(25);
+
       return res.status(200).json({
         success: true,
-        invoices: []
+        invoices: invoices.map((invoice) => ({
+          id: invoice.invoiceNumber,
+          orderId: invoice.orderId,
+          paymentId: invoice.paymentId,
+          date: new Date(invoice.paidAt || invoice.createdAt).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          }),
+          amount: formatInvoiceAmount(invoice.totalAmountPaise, invoice.currency),
+          status: invoice.status === 'paid' ? 'Paid' : invoice.status,
+          downloadUrl: buildInvoiceDownloadUrl(req, invoice._id),
+        }))
       });
     } catch (error) {
       logger.error('Failed to get invoices', { error: error.message });
@@ -845,6 +971,10 @@ module.exports = {
         ? new Date(user.subscriptionCurrentPeriodEnd).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
         : null;
 
+      const invoices = await Invoice.find({ userId: user._id })
+        .sort({ paidAt: -1, createdAt: -1 })
+        .limit(10);
+
       return res.status(200).json({
         success: true,
         currentPlan,
@@ -860,11 +990,57 @@ module.exports = {
           storagePercentUsed: storageInfo.percentUsed,
           canBuyExtraStorage: userPlan.canBuyExtraStorage,
         },
-        invoices: []
+        invoices: invoices.map((invoice) => ({
+          id: invoice.invoiceNumber,
+          orderId: invoice.orderId,
+          paymentId: invoice.paymentId,
+          date: new Date(invoice.paidAt || invoice.createdAt).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          }),
+          amount: formatInvoiceAmount(invoice.totalAmountPaise, invoice.currency),
+          status: invoice.status === 'paid' ? 'Paid' : invoice.status,
+          downloadUrl: buildInvoiceDownloadUrl(req, invoice._id),
+        }))
       });
     } catch (error) {
       logger.error('Failed to get billing info', { error: error.message });
       return res.status(500).json({ success: false, error: 'Failed to get billing info' });
+    }
+  },
+
+  downloadInvoice: async (req, res) => {
+    try {
+      const invoice = await Invoice.findOne({
+        _id: req.params.id,
+        userId: req.user._id,
+      });
+
+      if (!invoice) {
+        return res.status(404).json({
+          success: false,
+          error: 'Invoice not found'
+        });
+      }
+
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${invoice.invoiceNumber}.html"`
+      );
+
+      return res.status(200).send(buildInvoiceHtml(invoice));
+    } catch (error) {
+      logger.error('Failed to download invoice', {
+        error: error.message,
+        invoiceId: req.params.id,
+        userId: req.user?._id
+      });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to download invoice'
+      });
     }
   }
 };
