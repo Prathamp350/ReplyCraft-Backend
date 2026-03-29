@@ -225,13 +225,14 @@ module.exports = {
 
   getStats: async (req, res) => {
     try {
-      const totalUsers = await User.countDocuments({ role: { $ne: 'superadmin' } });
-      const freeUsers = await User.countDocuments({ plan: 'free' });
-      const paidUsers = totalUsers - freeUsers;
+      const activeUsers = await User.countDocuments({ role: 'user', isActive: true });
+      const paidUsers = await User.countDocuments({ role: 'user', isActive: true, plan: { $ne: 'free' } });
+      const freeUsers = await User.countDocuments({ role: 'user', isActive: true, plan: 'free' });
+      const staffUsers = await User.countDocuments({ role: { $in: ['support', 'finance', 'admin', 'superadmin'] }, isActive: true });
 
       return res.status(200).json({ 
         success: true, 
-        stats: { totalUsers, freeUsers, paidUsers }
+        stats: { activeUsers, freeUsers, paidUsers, staffUsers }
       });
     } catch (error) {
       return res.status(500).json({ success: false, error: 'Failed to fetch live stats' });

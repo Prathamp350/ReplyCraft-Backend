@@ -8,6 +8,7 @@ const Razorpay = require('razorpay');
 const User = require('../models/User');
 const BusinessConnection = require('../models/BusinessConnection');
 const PromoCode = require('../models/PromoCode');
+const CheckoutQuote = require('../models/CheckoutQuote');
 
 const baseConfig = require('../config/config');
 const { getConfig } = require('../services/configManager');
@@ -81,6 +82,42 @@ async function buildOrderPricing(planType, billing = 'monthly', promoCode = '') 
   };
 }
 
+async function createCheckoutQuote({ userId, planType, billing = 'monthly', promoCode = '' }) {
+  const pricing = await buildOrderPricing(planType, billing, promoCode);
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  const quote = await CheckoutQuote.create({
+    userId,
+    plan: planType,
+    billing,
+    currency: 'INR',
+    basePricePaise: pricing.basePricePaise,
+    finalPricePaise: pricing.finalPricePaise,
+    discountPercent: pricing.discountPercent,
+    promoCode: pricing.appliedPromo,
+    expiresAt,
+  });
+
+  return { quote, pricing };
+}
+
+async function getValidQuote(userId, quoteId) {
+  const quote = await CheckoutQuote.findOne({
+    _id: quoteId,
+    userId,
+    status: 'active',
+    expiresAt: { $gt: new Date() },
+  });
+
+  if (!quote) {
+    const error = new Error('This checkout quote has expired. Please refresh and try again.');
+    error.statusCode = 410;
+    throw error;
+  }
+
+  return quote;
+}
+
 /**
  * Get available plans
  */
@@ -118,7 +155,7 @@ const getPlans = async (req, res) => {
  */
 const createOrder = async (req, res) => {
   try {
-    const { plan: planType, billing = 'monthly', promoCode } = req.body;
+    const { plan: planType, billing = 'monthly', promoCode, quoteId } = req.body;
     const user = req.user;
 
     // Validate plan
@@ -137,8 +174,28 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const { rpPlan, finalPricePaise, appliedPromo, basePricePaise, discountPercent } =
-      await buildOrderPricing(planType, billing, promoCode);
+    let rpPlan;
+    let finalPricePaise;
+    let appliedPromo;
+    let basePricePaise;
+    let discountPercent;
+    let resolvedPlan = planType;
+    let resolvedBilling = billing;
+    let quote = null;
+
+    if (quoteId) {
+      quote = await getValidQuote(user._id, quoteId);
+      rpPlan = getRazorpayPlan(quote.plan);
+      finalPricePaise = quote.finalPricePaise;
+      appliedPromo = quote.promoCode;
+      basePricePaise = quote.basePricePaise;
+      discountPercent = quote.discountPercent;
+      resolvedPlan = quote.plan;
+      resolvedBilling = quote.billing;
+    } else {
+      ({ rpPlan, finalPricePaise, appliedPromo, basePricePaise, discountPercent } =
+        await buildOrderPricing(planType, billing, promoCode));
+    }
 
     // Create Razorpay order
     const options = {
@@ -147,10 +204,11 @@ const createOrder = async (req, res) => {
       receipt: `receipt_${user._id}_${Date.now()}`,
       notes: {
         userId: user._id.toString(),
-        plan: planType,
-        billing,
+        plan: resolvedPlan,
+        billing: resolvedBilling,
         email: user.email,
-        promoCode: appliedPromo || ''
+        promoCode: appliedPromo || '',
+        quoteId: quote?._id?.toString() || ''
       }
     };
 
@@ -159,9 +217,14 @@ const createOrder = async (req, res) => {
     logger.logBilling('Razorpay order created', {
       orderId: order.id,
       userId: user._id,
-      plan: planType,
+      plan: resolvedPlan,
       amount: finalPricePaise
     });
+
+    if (quote) {
+      quote.razorpayOrderId = order.id;
+      await quote.save();
+    }
 
     return res.status(200).json({
       success: true,
@@ -169,9 +232,10 @@ const createOrder = async (req, res) => {
       amount: order.amount,
       currency: order.currency,
       keyId: process.env.RAZORPAY_KEY_ID,
-      billing,
+      billing: resolvedBilling,
       baseAmount: basePricePaise,
       discountPercent,
+      quoteId: quote?._id?.toString() || null,
       plan: {
         id: rpPlan.id,
         name: rpPlan.name,
@@ -197,7 +261,7 @@ const createOrder = async (req, res) => {
  */
 const verifyPayment = async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan: planType, promoCode } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan: planType, promoCode, quoteId } = req.body;
     const user = req.user;
 
     // Validate required fields
@@ -214,6 +278,17 @@ const verifyPayment = async (req, res) => {
         success: false,
         error: 'Invalid plan'
       });
+    }
+
+    let quote = null;
+    if (quoteId) {
+      quote = await CheckoutQuote.findOne({ _id: quoteId, userId: user._id });
+      if (quote && quote.status === 'used') {
+        return res.status(409).json({
+          success: false,
+          error: 'This checkout quote has already been used'
+        });
+      }
     }
 
     // Verify signature
@@ -257,6 +332,11 @@ const verifyPayment = async (req, res) => {
     }
     
     await user.save();
+
+    if (quote) {
+      quote.status = 'used';
+      await quote.save();
+    }
 
     logger.logBilling('Payment verified, plan activated', {
       userId: user._id,
@@ -469,11 +549,18 @@ module.exports = {
         });
       }
 
-      const { rpPlan, basePricePaise, finalPricePaise, discountPercent } =
-        await buildOrderPricing(planType, billing, promoCode);
+      const { quote, pricing } = await createCheckoutQuote({
+        userId: req.user._id,
+        planType,
+        billing,
+        promoCode,
+      });
+      const { rpPlan, basePricePaise, finalPricePaise, discountPercent } = pricing;
 
       return res.status(200).json({
         success: true,
+        quoteId: quote._id.toString(),
+        expiresAt: quote.expiresAt,
         planId: rpPlan.id,
         planName: rpPlan.name,
         billing,
