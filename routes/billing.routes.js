@@ -10,6 +10,7 @@ const {
   getPlans,
   createOrder,
   verifyPayment,
+  getOrderSummary,
   validatePromo,
   getSubscriptionStatus,
   cancelSubscription,
@@ -24,6 +25,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), handleWebhook
 
 // Protected routes - require authentication
 router.get('/plans', getPlans);
+router.post('/order-summary', authenticate, getOrderSummary);
 router.get('/', authenticate, getBillingInfo);
 router.get('/subscription', authenticate, getSubscriptionStatus);
 router.get('/usage', authenticate, getUsage);

@@ -50,7 +50,7 @@ const createStaff = async (req, res) => {
       email: email.toLowerCase(),
       password,
       role: role,
-      plan: config.defaultPlan,
+      plan: baseConfig.defaultPlan,
       isEmailVerified: true,
       isOnboarded: true
     });
@@ -235,6 +235,74 @@ module.exports = {
       });
     } catch (error) {
       return res.status(500).json({ success: false, error: 'Failed to fetch live stats' });
+    }
+  },
+
+  updateUserPlan: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { plan } = req.body;
+
+      if (!baseConfig.validPlans.includes(plan)) {
+        return res.status(400).json({ success: false, error: 'Invalid plan selected' });
+      }
+
+      const user = await User.findById(id);
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'User not found' });
+      }
+
+      if (user.role !== 'user') {
+        return res.status(403).json({ success: false, error: 'Only platform users can be managed here' });
+      }
+
+      user.plan = plan;
+      if (plan === 'free') {
+        user.subscriptionStatus = 'canceled';
+        user.subscriptionCurrentPeriodEnd = null;
+        user.planExpiresAt = null;
+        user.extraStorageMB = 0;
+      } else {
+        user.subscriptionStatus = 'active';
+        user.subscriptionCurrentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        user.planExpiresAt = user.subscriptionCurrentPeriodEnd;
+      }
+
+      await user.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'User plan updated successfully',
+        user,
+      });
+    } catch (error) {
+      logger.error('Update User Plan Error', { error: error.message });
+      return res.status(500).json({ success: false, error: 'Failed to update user plan' });
+    }
+  },
+
+  deleteUser: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const user = await User.findById(id);
+
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'User not found' });
+      }
+
+      if (user.role !== 'user') {
+        return res.status(403).json({ success: false, error: 'Only platform users can be deleted here' });
+      }
+
+      await User.findByIdAndDelete(id);
+
+      return res.status(200).json({
+        success: true,
+        message: 'User deleted successfully'
+      });
+    } catch (error) {
+      logger.error('Delete User Error', { error: error.message });
+      return res.status(500).json({ success: false, error: 'Failed to delete user' });
     }
   }
 };

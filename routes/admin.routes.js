@@ -21,9 +21,11 @@ router.get('/promocodes', authorizeRoles('superadmin', 'admin'), adminController
 router.delete('/promocodes/:id', authorizeRoles('superadmin', 'admin'), adminController.deletePromo);
 
 router.get('/plans', authorizeRoles('superadmin', 'admin'), adminController.getPlans);
-router.put('/plans/:planId', authorizeRoles('superadmin'), adminController.updatePlan);
+router.put('/plans/:planId', authorizeRoles('superadmin', 'admin'), adminController.updatePlan);
 
 router.get('/users', authorizeRoles('superadmin', 'admin', 'support'), adminController.getUsers);
+router.patch('/users/:id/plan', authorizeRoles('superadmin', 'admin'), adminController.updateUserPlan);
+router.delete('/users/:id', authorizeRoles('superadmin', 'admin'), adminController.deleteUser);
 router.get('/stats/live', authorizeRoles('superadmin', 'admin'), adminController.getStats);
 
 module.exports = router;

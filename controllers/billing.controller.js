@@ -36,6 +36,51 @@ function getRazorpayPlan(planId) {
   };
 }
 
+function getBillingMultiplier(billing = 'monthly') {
+  return billing === 'yearly' ? 12 * 0.8 : 1;
+}
+
+async function buildOrderPricing(planType, billing = 'monthly', promoCode = '') {
+  const rpPlan = getRazorpayPlan(planType);
+  if (!rpPlan) {
+    throw new Error('Invalid plan');
+  }
+
+  const multiplier = getBillingMultiplier(billing);
+  const basePricePaise = Math.max(100, Math.round(rpPlan.price * multiplier));
+  let finalPricePaise = basePricePaise;
+  let appliedPromo = null;
+  let discountPercent = 0;
+
+  if (promoCode) {
+    const promo = await PromoCode.findOne({ code: promoCode.trim().toUpperCase() });
+    if (!promo || !promo.isValid()) {
+      const error = new Error('Invalid or expired promo code.');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (promo.applicablePlan !== 'all' && promo.applicablePlan !== planType) {
+      const error = new Error(`Promo applies only to ${promo.applicablePlan} plan.`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    discountPercent = promo.discountPercent;
+    finalPricePaise = Math.round(finalPricePaise * ((100 - promo.discountPercent) / 100));
+    if (finalPricePaise < 100) finalPricePaise = 100;
+    appliedPromo = promo.code;
+  }
+
+  return {
+    rpPlan,
+    billing,
+    basePricePaise,
+    finalPricePaise,
+    appliedPromo,
+    discountPercent,
+  };
+}
+
 /**
  * Get available plans
  */
@@ -73,7 +118,7 @@ const getPlans = async (req, res) => {
  */
 const createOrder = async (req, res) => {
   try {
-    const { plan: planType, promoCode } = req.body;
+    const { plan: planType, billing = 'monthly', promoCode } = req.body;
     const user = req.user;
 
     // Validate plan
@@ -84,8 +129,6 @@ const createOrder = async (req, res) => {
       });
     }
 
-    const rpPlan = getRazorpayPlan(planType);
-
     // Free plan doesn't need payment
     if (planType === 'free') {
       return res.status(400).json({
@@ -94,23 +137,8 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // Create Razorpay order
-        let finalPricePaise = rpPlan.price;
-    let appliedPromo = null;
-
-    if (promoCode) {
-      const promo = await PromoCode.findOne({ code: promoCode.trim().toUpperCase() });
-      if (!promo || !promo.isValid()) {
-        return res.status(400).json({ success: false, error: 'Invalid or expired promo code.' });
-      }
-      if (promo.applicablePlan !== 'all' && promo.applicablePlan !== planType) {
-        return res.status(400).json({ success: false, error: `Promo applies only to ${promo.applicablePlan} plan.` });
-      }
-
-      finalPricePaise = Math.round(finalPricePaise * ((100 - promo.discountPercent) / 100));
-      if (finalPricePaise < 100) finalPricePaise = 100; // Razorpay min 1 INR
-      appliedPromo = promo.code;
-    }
+    const { rpPlan, finalPricePaise, appliedPromo, basePricePaise, discountPercent } =
+      await buildOrderPricing(planType, billing, promoCode);
 
     // Create Razorpay order
     const options = {
@@ -120,6 +148,7 @@ const createOrder = async (req, res) => {
       notes: {
         userId: user._id.toString(),
         plan: planType,
+        billing,
         email: user.email,
         promoCode: appliedPromo || ''
       }
@@ -140,6 +169,9 @@ const createOrder = async (req, res) => {
       amount: order.amount,
       currency: order.currency,
       keyId: process.env.RAZORPAY_KEY_ID,
+      billing,
+      baseAmount: basePricePaise,
+      discountPercent,
       plan: {
         id: rpPlan.id,
         name: rpPlan.name,
@@ -426,6 +458,45 @@ module.exports = {
   getSubscriptionStatus,
   cancelSubscription,
   handleWebhook,
+  getOrderSummary: async (req, res) => {
+    try {
+      const { plan: planType, billing = 'monthly', promoCode } = req.body;
+
+      if (!planType || !getConfig().plans[planType]) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid plan. Choose from: ${baseConfig.validPlans.join(', ')}`
+        });
+      }
+
+      const { rpPlan, basePricePaise, finalPricePaise, discountPercent } =
+        await buildOrderPricing(planType, billing, promoCode);
+
+      return res.status(200).json({
+        success: true,
+        planId: rpPlan.id,
+        planName: rpPlan.name,
+        billing,
+        basePrice: Math.round(basePricePaise / 100),
+        currency: 'INR',
+        currencySymbol: '₹',
+        discount: Math.round((basePricePaise - finalPricePaise) / 100),
+        discountLabel: discountPercent > 0 ? `${discountPercent}% off` : '',
+        tax: 0,
+        taxLabel: '',
+        total: Math.round(finalPricePaise / 100),
+        period: billing === 'yearly' ? 'year' : 'month',
+        features: getConfig().plans[planType].features,
+      });
+    } catch (error) {
+      const statusCode = error.statusCode || 500;
+      logger.error('Failed to get order summary', { error: error.message });
+      return res.status(statusCode).json({
+        success: false,
+        error: error.message || 'Failed to get order summary'
+      });
+    }
+  },
 
   validatePromo: async (req, res) => {
     try {
@@ -442,7 +513,9 @@ module.exports = {
 
       return res.status(200).json({
         success: true,
+        valid: true,
         discountPercent: promo.discountPercent,
+        discountLabel: `${promo.discountPercent}% off`,
         message: 'Promo applied successfully!'
       });
     } catch (error) {
