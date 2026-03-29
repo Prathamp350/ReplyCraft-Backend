@@ -5,6 +5,7 @@
  */
 
 const Razorpay = require('razorpay');
+const crypto = require('crypto');
 const User = require('../models/User');
 const BusinessConnection = require('../models/BusinessConnection');
 const PromoCode = require('../models/PromoCode');
@@ -14,11 +15,28 @@ const baseConfig = require('../config/config');
 const { getConfig } = require('../services/configManager');
 const logger = require('../utils/logger');
 
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || 'your_key_id',
-  key_secret: process.env.RAZORPAY_KEY_SECRET || 'your_key_secret'
-});
+const isPlaceholderValue = (value = '') =>
+  !value || value.startsWith('your_') || value.includes('change_me');
+
+const assertRazorpayConfigured = () => {
+  if (
+    isPlaceholderValue(process.env.RAZORPAY_KEY_ID) ||
+    isPlaceholderValue(process.env.RAZORPAY_KEY_SECRET)
+  ) {
+    const error = new Error('Razorpay is not configured. Add valid RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.');
+    error.statusCode = 503;
+    throw error;
+  }
+};
+
+const getRazorpayClient = () => {
+  assertRazorpayConfigured();
+
+  return new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET
+  });
+};
 
 // Derive Razorpay plan config from centralized config
 function getRazorpayPlan(planId) {
@@ -157,6 +175,7 @@ const createOrder = async (req, res) => {
   try {
     const { plan: planType, billing = 'monthly', promoCode, quoteId } = req.body;
     const user = req.user;
+    const razorpay = getRazorpayClient();
 
     // Validate plan
     if (!planType || !getConfig().plans[planType]) {
@@ -229,6 +248,7 @@ const createOrder = async (req, res) => {
     return res.status(200).json({
       success: true,
       orderId: order.id,
+      gateway: 'razorpay',
       amount: order.amount,
       currency: order.currency,
       keyId: process.env.RAZORPAY_KEY_ID,
@@ -236,6 +256,7 @@ const createOrder = async (req, res) => {
       baseAmount: basePricePaise,
       discountPercent,
       quoteId: quote?._id?.toString() || null,
+      quoteExpiresAt: quote?.expiresAt || null,
       plan: {
         id: rpPlan.id,
         name: rpPlan.name,
@@ -244,14 +265,17 @@ const createOrder = async (req, res) => {
     });
 
   } catch (error) {
+    const statusCode = error.statusCode || 500;
     logger.error('Failed to create order', {
       error: error.message,
-      userId: req.userId
+      userId: req.userId,
+      planType: req.body?.plan,
+      quoteId: req.body?.quoteId
     });
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
-      error: 'Failed to create payment order'
+      error: error.message || 'Failed to create payment order'
     });
   }
 };
@@ -263,6 +287,7 @@ const verifyPayment = async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, plan: planType, promoCode, quoteId } = req.body;
     const user = req.user;
+    const razorpay = getRazorpayClient();
 
     // Validate required fields
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
@@ -272,17 +297,26 @@ const verifyPayment = async (req, res) => {
       });
     }
 
-    // Validate plan
-    if (!planType || !getConfig().plans[planType]) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid plan'
-      });
-    }
-
     let quote = null;
     if (quoteId) {
       quote = await CheckoutQuote.findOne({ _id: quoteId, userId: user._id });
+      if (quote && quote.status === 'used' && user.razorpayPaymentId === razorpay_payment_id) {
+        const activePlan = getConfig().plans[user.plan] || getConfig().plans.free;
+        return res.status(200).json({
+          success: true,
+          message: 'Payment already verified.',
+          plan: {
+            id: user.plan,
+            name: activePlan.name,
+            monthlyLimit: activePlan.monthlyLimit
+          },
+          subscription: {
+            status: user.subscriptionStatus || 'active',
+            currentPeriodEnd: user.subscriptionCurrentPeriodEnd
+          }
+        });
+      }
+
       if (quote && quote.status === 'used') {
         return res.status(409).json({
           success: false,
@@ -292,7 +326,6 @@ const verifyPayment = async (req, res) => {
     }
 
     // Verify signature
-    const crypto = require('crypto');
     const generatedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
@@ -310,37 +343,96 @@ const verifyPayment = async (req, res) => {
       });
     }
 
+    const [order, payment] = await Promise.all([
+      razorpay.orders.fetch(razorpay_order_id),
+      razorpay.payments.fetch(razorpay_payment_id)
+    ]);
+
+    if (!order || !payment) {
+      return res.status(400).json({
+        success: false,
+        error: 'Unable to validate payment with Razorpay'
+      });
+    }
+
+    if (payment.order_id !== razorpay_order_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment does not belong to the supplied order'
+      });
+    }
+
+    if (!['authorized', 'captured'].includes(payment.status)) {
+      return res.status(400).json({
+        success: false,
+        error: `Payment is not complete. Current status: ${payment.status}`
+      });
+    }
+
+    if (String(order.notes?.userId || '') !== String(user._id)) {
+      return res.status(403).json({
+        success: false,
+        error: 'This payment order does not belong to the authenticated user'
+      });
+    }
+
+    const resolvedPlanType = quote?.plan || order.notes?.plan || planType;
+    if (!resolvedPlanType || !getConfig().plans[resolvedPlanType]) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid plan'
+      });
+    }
+
+    const resolvedBilling = quote?.billing || order.notes?.billing || 'monthly';
+    const resolvedPromoCode = quote?.promoCode || promoCode || null;
+    const expectedAmountPaise = quote?.finalPricePaise || order.amount;
+
+    if (Number(order.amount) !== Number(expectedAmountPaise)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Order amount does not match the locked checkout quote'
+      });
+    }
+
     // Payment verified - update user plan
-    const plan = getConfig().plans[planType];
+    const plan = getConfig().plans[resolvedPlanType];
+    const subscriptionEnd = new Date(
+      Date.now() + (resolvedBilling === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000
+    );
     
-    user.plan = planType;
+    user.plan = resolvedPlanType;
     user.razorpayOrderId = razorpay_order_id;
     user.razorpayPaymentId = razorpay_payment_id;
     user.razorpaySubscriptionStatus = 'active';
     user.subscriptionStatus = 'active';
-    user.subscriptionCurrentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    user.subscriptionCurrentPeriodEnd = subscriptionEnd;
     user.planExpiresAt = user.subscriptionCurrentPeriodEnd;
     
     // Increment promo usage if appended
-    if (promoCode) {
-      const promo = await PromoCode.findOne({ code: promoCode.trim().toUpperCase() });
+    if (resolvedPromoCode) {
+      const promo = await PromoCode.findOne({ code: resolvedPromoCode.trim().toUpperCase() });
       if (promo) {
         promo.currentUses += 1;
         await promo.save();
         user.appliedPromoCode = promo.code;
       }
+    } else {
+      user.appliedPromoCode = null;
     }
     
     await user.save();
 
     if (quote) {
       quote.status = 'used';
+      quote.razorpayOrderId = razorpay_order_id;
       await quote.save();
     }
 
     logger.logBilling('Payment verified, plan activated', {
       userId: user._id,
-      plan: planType,
+      plan: resolvedPlanType,
+      billing: resolvedBilling,
       paymentId: razorpay_payment_id
     });
 
@@ -359,14 +451,17 @@ const verifyPayment = async (req, res) => {
     });
 
   } catch (error) {
+    const statusCode = error.statusCode || 500;
     logger.error('Payment verification error', {
       error: error.message,
-      userId: req.userId
+      userId: req.userId,
+      orderId: req.body?.razorpay_order_id,
+      paymentId: req.body?.razorpay_payment_id
     });
 
-    return res.status(500).json({
+    return res.status(statusCode).json({
       success: false,
-      error: 'Payment verification failed'
+      error: error.message || 'Payment verification failed'
     });
   }
 };
@@ -459,16 +554,23 @@ const cancelSubscription = async (req, res) => {
  */
 const handleWebhook = async (req, res) => {
   try {
-    const crypto = require('crypto');
     const signature = req.headers['x-razorpay-signature'];
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+
+    if (isPlaceholderValue(webhookSecret)) {
+      logger.error('Razorpay webhook secret is not configured');
+      return res.status(503).json({ error: 'Webhook secret not configured' });
+    }
 
     // Verify webhook signature
-    const rawPayload = Buffer.isBuffer(req.body)
-      ? req.body
-      : Buffer.from(JSON.stringify(req.body));
+    const rawPayload = Buffer.isBuffer(req.rawBody)
+      ? req.rawBody
+      : Buffer.isBuffer(req.body)
+        ? req.body
+        : Buffer.from(JSON.stringify(req.body || {}));
 
     const generatedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .createHmac('sha256', webhookSecret)
       .update(rawPayload)
       .digest('hex');
 

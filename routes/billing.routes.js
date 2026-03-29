@@ -21,7 +21,7 @@ const {
 } = require('../controllers/billing.controller');
 
 // Webhook - no auth required
-router.post('/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+router.post('/webhook', handleWebhook);
 
 // Protected routes - require authentication
 router.get('/plans', getPlans);
