@@ -8,7 +8,7 @@ const Razorpay = require('razorpay');
 const User = require('../models/User');
 const BusinessConnection = require('../models/BusinessConnection');
 const PromoCode = require('../models/PromoCode');
-const PromoCode = require('../models/PromoCode');
+
 const baseConfig = require('../config/config');
 const { getConfig } = require('../services/configManager');
 const logger = require('../utils/logger');
@@ -450,8 +450,8 @@ module.exports = {
       return res.status(500).json({ success: false, error: 'Promo validation failed' });
     }
   },
-  cancelSubscription,
-  handleWebhook,
+
+
 
   getUsage: async (req, res) => {
     try {
