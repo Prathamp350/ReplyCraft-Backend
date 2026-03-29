@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const baseConfig = require('../config/config');
+const config = require('../config/config');
 const logger = require('../utils/logger');
 const { queueWelcomeEmail, queueOtpEmail } = require('../queues/email.queue');
 const { OAuth2Client } = require('google-auth-library');
@@ -149,9 +149,9 @@ const register = async (req, res) => {
     let user = await User.findOne({ email: email.toLowerCase() });
     
     // Validate plan if provided
-    const userPlan = plan && baseConfig.validPlans.includes(plan.toLowerCase()) 
+    const userPlan = plan && config.validPlans.includes(plan.toLowerCase()) 
       ? plan.toLowerCase() 
-      : baseConfig.defaultPlan;
+      : config.defaultPlan;
 
     const otp = generateOtp();
     const otpExpiresAt = new Date(Date.now() + 5 * 60000); // 5 minutes
