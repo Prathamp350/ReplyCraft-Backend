@@ -241,10 +241,12 @@ const createOrder = async (req, res) => {
     }
 
     // Create Razorpay order
+    const shortUserId = String(user._id).slice(-8);
+    const shortTimestamp = Date.now().toString().slice(-10);
     const options = {
       amount: finalPricePaise, // Amount in paise
       currency: 'INR',
-      receipt: `receipt_${user._id}_${Date.now()}`,
+      receipt: `rc_${shortUserId}_${shortTimestamp}`,
       notes: {
         userId: user._id.toString(),
         plan: resolvedPlan,
