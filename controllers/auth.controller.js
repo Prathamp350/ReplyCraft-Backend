@@ -7,6 +7,11 @@ const { OAuth2Client } = require('google-auth-library');
 
 const googleClient = new OAuth2Client(process.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID);
 
+const getJwtConfig = () => ({
+  secret: config?.jwt?.secret || process.env.JWT_SECRET,
+  expiresIn: config?.jwt?.expiresIn || process.env.JWT_EXPIRES_IN || '7d',
+});
+
 /**
  * Generate a 6-digit OTP
  */
@@ -90,10 +95,11 @@ const googleLogin = async (req, res) => {
     }
 
     // Generate JWT token for backend
+    const jwtConfig = getJwtConfig();
     const token = jwt.sign(
       { userId: user._id, email: user.email },
-      config.jwt.secret,
-      { expiresIn: config.jwt.expiresIn }
+      jwtConfig.secret,
+      { expiresIn: jwtConfig.expiresIn }
     );
 
     // Return user data and token
@@ -107,6 +113,7 @@ const googleLogin = async (req, res) => {
         plan: user.plan,
         monthlyUsage: user.monthlyUsage,
         avatarUrl: user.avatarUrl,
+        role: user.role,
         isOnboarded: user.isOnboarded
       },
       token
@@ -381,10 +388,11 @@ const verifyOtp = async (req, res) => {
     }
 
     // Generate JWT token
+    const jwtConfig = getJwtConfig();
     const token = jwt.sign(
       { userId: user._id, email: user.email },
-      config.jwt.secret,
-      { expiresIn: config.jwt.expiresIn }
+      jwtConfig.secret,
+      { expiresIn: jwtConfig.expiresIn }
     );
 
     logger.logAuth('User verified OTP and logged in', { userId: user._id, email: user.email });
@@ -399,6 +407,7 @@ const verifyOtp = async (req, res) => {
         plan: user.plan,
         monthlyUsage: user.monthlyUsage,
         avatarUrl: user.avatarUrl,
+        role: user.role,
         isOnboarded: user.isOnboarded
       },
       token
