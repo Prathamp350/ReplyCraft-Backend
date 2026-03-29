@@ -34,21 +34,51 @@ const { syncAllSubscriptions } = require('./controllers/webhook.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { bullBoardRouter } = require('./config/bullBoard');
 const { loadConfig } = require('./services/configManager');
+
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:8080',
   'http://localhost:3000',
   'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
   'https://replycraft.co.in',
   'https://www.replycraft.co.in',
 ];
+
+const normalizeOrigin = (origin) => {
+  if (!origin || typeof origin !== 'string') {
+    return '';
+  }
+
+  return origin.trim().replace(/\/+$/, '').toLowerCase();
+};
+
+const isTrustedReplyCraftOrigin = (origin) => {
+  try {
+    const { hostname } = new URL(origin);
+    const normalizedHost = hostname.toLowerCase();
+
+    return (
+      normalizedHost === 'replycraft.co.in' ||
+      normalizedHost.endsWith('.replycraft.co.in')
+    );
+  } catch (error) {
+    return false;
+  }
+};
 
 const allowedOrigins = new Set(
   [
     ...DEFAULT_ALLOWED_ORIGINS,
     process.env.FRONTEND_URL,
     process.env.APP_URL,
+    process.env.CLIENT_URL,
+    process.env.WEBSITE_URL,
+    process.env.PUBLIC_APP_URL,
     ...(process.env.ALLOWED_ORIGINS || '').split(',').map((origin) => origin.trim()),
-  ].filter(Boolean)
+  ]
+    .map(normalizeOrigin)
+    .filter(Boolean)
 );
 
 // Ensure uploads directory exists
@@ -89,15 +119,24 @@ app.use(cors({
       return callback(null, true);
     }
 
+    const normalizedOrigin = normalizeOrigin(origin);
     const isAllowed =
-      allowedOrigins.has(origin) ||
-      origin.endsWith('.replycraft.co.in');
+      allowedOrigins.has(normalizedOrigin) ||
+      isTrustedReplyCraftOrigin(normalizedOrigin);
 
     if (isAllowed) {
       return callback(null, true);
     }
 
-    return callback(new Error('Origin not allowed by CORS'));
+    logger.warn('Blocked request by CORS policy', {
+      origin,
+      normalizedOrigin,
+      allowedOrigins: Array.from(allowedOrigins)
+    });
+
+    const corsError = new Error('Origin not allowed by CORS');
+    corsError.statusCode = 403;
+    return callback(corsError);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -203,8 +242,17 @@ app.use((err, req, res, next) => {
     error: err.message,
     stack: err.stack,
     path: req.path,
-    method: req.method
+    method: req.method,
+    origin: req.headers.origin
   });
+
+  if (err.message === 'Origin not allowed by CORS') {
+    return res.status(err.statusCode || 403).json({
+      success: false,
+      error: 'Origin not allowed by CORS'
+    });
+  }
+
   res.status(500).json({
     success: false,
     error: 'Internal server error'
