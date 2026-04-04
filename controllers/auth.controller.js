@@ -20,6 +20,17 @@ const generateOtp = () => {
 };
 
 /**
+ * Validate password strength
+ */
+const validatePassword = (password) => {
+  if (password.length < 8) return 'Password must be at least 8 characters';
+  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter';
+  if (!/[a-z]/.test(password)) return 'Password must contain at least one lowercase letter';
+  if (!/[^A-Za-z0-9]/.test(password)) return 'Password must contain at least one symbol';
+  return null;
+};
+
+/**
  * Google Login - Exchange Google ID token for JWT
  */
 const googleLogin = async (req, res) => {
@@ -148,6 +159,14 @@ const register = async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Name is required'
+      });
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      return res.status(400).json({
+        success: false,
+        error: passwordError
       });
     }
 
@@ -544,6 +563,11 @@ const resetPassword = async (req, res) => {
 
     if (!email || !otp || !newPassword) {
       return res.status(400).json({ success: false, error: 'Email, OTP, and new password are required' });
+    }
+
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ success: false, error: passwordError });
     }
 
     const user = await User.findOne({ email: email.toLowerCase() });
