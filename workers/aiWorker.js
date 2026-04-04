@@ -107,7 +107,11 @@ async function processReplyJob(job) {
     // Generate AI reply
     const prompt = promptService.buildPrompt(reviewText, restaurantProfile);
     const rawReply = await ollamaService.generateReply(config.ollama.defaultModel, prompt);
-    const replyText = cleanReplyUtil.cleanReply(rawReply);
+    let replyText = cleanReplyUtil.cleanReply(rawReply);
+
+    if (user.plan === 'free') {
+      replyText += '\n\n*Powered by ReplyCraft*';
+    }
 
     // Handle based on reply mode and platform
     if (replyMode === 'auto') {
