@@ -66,8 +66,8 @@ const getProfile = async (req, res) => {
       timezone: user ? user.timezone : 'UTC',
       address: user ? user.address : null,
       city: user ? user.city : null,
+      state: user ? user.state : null,
       country: user ? user.country : null,
-      dob: user ? user.dob : null,
       isOnboarded: user ? user.isOnboarded : false,
       // Restaurant profile (AI settings)
       profile: profile || null,
@@ -95,7 +95,7 @@ const saveProfile = async (req, res) => {
   try {
     const { 
       // User profile fields
-      name, phoneNumber, businessName, timezone, address, city, country, dob,
+      name, phoneNumber, businessName, timezone, address, city, state, country,
       // Restaurant profile fields  
       restaurantName, brandTone, emojiAllowed, cuisineType, replyMode, replyDelayMinutes 
     } = req.body;
@@ -109,8 +109,8 @@ const saveProfile = async (req, res) => {
       if (timezone !== undefined) user.timezone = timezone || 'UTC';
       if (address !== undefined) user.address = address || null;
       if (city !== undefined) user.city = city || null;
+      if (state !== undefined) user.state = state || null;
       if (country !== undefined) user.country = country || null;
-      if (dob !== undefined) user.dob = dob || null;
       await user.save();
     }
 

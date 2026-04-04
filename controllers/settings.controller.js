@@ -6,6 +6,7 @@
 const User = require('../models/User');
 const RestaurantProfile = require('../models/RestaurantProfile');
 const logger = require('../utils/logger');
+const { validatePassword } = require('../utils/validators');
 
 /**
  * Get user settings (profile + restaurant settings)
@@ -163,10 +164,11 @@ const changePassword = async (req, res) => {
       });
     }
 
-    if (newPassword.length < 6) {
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
       return res.status(400).json({
         success: false,
-        error: 'New password must be at least 6 characters'
+        error: passwordError
       });
     }
 

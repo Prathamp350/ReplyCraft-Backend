@@ -4,6 +4,7 @@ const config = require('../config/config');
 const logger = require('../utils/logger');
 const { queueWelcomeEmail, queueOtpEmail } = require('../queues/email.queue');
 const { OAuth2Client } = require('google-auth-library');
+const { validatePassword } = require('../utils/validators');
 
 const googleClient = new OAuth2Client(process.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID);
 
@@ -17,17 +18,6 @@ const getJwtConfig = () => ({
  */
 const generateOtp = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
-};
-
-/**
- * Validate password strength
- */
-const validatePassword = (password) => {
-  if (password.length < 8) return 'Password must be at least 8 characters';
-  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter';
-  if (!/[a-z]/.test(password)) return 'Password must contain at least one lowercase letter';
-  if (!/[^A-Za-z0-9]/.test(password)) return 'Password must contain at least one symbol';
-  return null;
 };
 
 /**

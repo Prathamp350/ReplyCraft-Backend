@@ -104,7 +104,8 @@ const userSchema = new mongoose.Schema({
   phoneNumber: {
     type: String,
     default: null,
-    trim: true
+    trim: true,
+    maxlength: [30, 'Phone number cannot exceed 30 characters']
   },
   businessName: {
     type: String,
@@ -119,21 +120,26 @@ const userSchema = new mongoose.Schema({
   address: {
     type: String,
     default: null,
-    trim: true
+    trim: true,
+    maxlength: [300, 'Address cannot exceed 300 characters']
   },
   city: {
     type: String,
     default: null,
-    trim: true
+    trim: true,
+    maxlength: [100, 'City cannot exceed 100 characters']
+  },
+  state: {
+    type: String,
+    default: null,
+    trim: true,
+    maxlength: [100, 'State cannot exceed 100 characters']
   },
   country: {
     type: String,
     default: null,
-    trim: true
-  },
-  dob: {
-    type: Date,
-    default: null
+    trim: true,
+    maxlength: [100, 'Country cannot exceed 100 characters']
   },
   isOnboarded: {
     type: Boolean,
