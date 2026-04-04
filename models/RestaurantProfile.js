@@ -23,7 +23,8 @@ const restaurantProfileSchema = new mongoose.Schema({
   cuisineType: {
     type: String,
     trim: true,
-    default: ''
+    default: '',
+    maxlength: [50, 'Industry cannot exceed 50 characters']
   },
   replyMode: {
     type: String,

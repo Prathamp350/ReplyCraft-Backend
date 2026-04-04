@@ -105,7 +105,8 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null,
     trim: true,
-    maxlength: [30, 'Phone number cannot exceed 30 characters']
+    maxlength: [30, 'Phone number cannot exceed 30 characters'],
+    match: [/^\+?[0-9\s-]+$/, 'Invalid phone number format']
   },
   businessName: {
     type: String,
