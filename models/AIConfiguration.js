@@ -18,9 +18,15 @@ const aiConfigurationSchema = new mongoose.Schema({
     trim: true,
     maxlength: [200, 'Business name cannot exceed 200 characters']
   },
+  systemPrompt: {
+    type: String,
+    trim: true,
+    maxlength: [5000, 'System prompt cannot exceed 5000 characters'],
+    default: "You are a professional AI managing customer interactions for my business."
+  },
   brandTone: {
     type: String,
-    enum: ['professional', 'casual', 'friendly'],
+    enum: ['professional', 'casual', 'friendly', 'formal'],
     default: 'professional'
   },
   emojiAllowed: {
@@ -50,7 +56,7 @@ const aiConfigurationSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Ensure unique config name per user
+// Remove strict uniqueness wrapper so users can have multiple configurations per user. We still want unique per name per user.
 aiConfigurationSchema.index({ userId: 1, configName: 1 }, { unique: true });
 aiConfigurationSchema.index({ userId: 1, isDefault: 1 });
 

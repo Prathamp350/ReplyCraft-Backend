@@ -63,6 +63,12 @@ const businessConnectionSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  // Linked AI Persona to handle these replies
+  aiConfigurationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AIConfiguration',
+    default: null
   }
 }, {
   timestamps: true

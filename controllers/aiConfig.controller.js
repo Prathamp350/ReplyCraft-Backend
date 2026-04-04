@@ -4,6 +4,7 @@
  */
 
 const AIConfiguration = require('../models/AIConfiguration');
+const User = require('../models/User');
 const logger = require('../utils/logger');
 
 /**
@@ -71,6 +72,7 @@ const createConfiguration = async (req, res) => {
   try {
     const { 
       configName, 
+      systemPrompt,
       businessName, 
       brandTone, 
       emojiAllowed, 
@@ -101,6 +103,26 @@ const createConfiguration = async (req, res) => {
       });
     }
 
+    const user = await User.findById(req.userId);
+    const plan = user?.plan || 'free';
+    const limit = plan === 'business' ? 7 : plan === 'pro' ? 3 : plan === 'starter' ? 1 : 0;
+    
+    if (limit === 0) {
+      return res.status(403).json({ success: false, error: 'Free plan does not support Custom AI Data Personas. Please upgrade.' });
+    }
+
+    const count = await AIConfiguration.countDocuments({ userId: req.userId, isActive: true });
+    if (count >= limit) {
+      return res.status(403).json({ success: false, error: `Plan limit reached. Your ${plan} plan allows up to ${limit} configuration(s). Please upgrade to add more.` });
+    }
+
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        error: 'Configuration name already exists'
+      });
+    }
+
     // If this is set as default, unset other defaults
     if (isDefault) {
       await AIConfiguration.updateMany(
@@ -113,6 +135,7 @@ const createConfiguration = async (req, res) => {
     const config = new AIConfiguration({
       userId: req.userId,
       configName: configName.trim(),
+      systemPrompt: systemPrompt || "You are a professional AI managing customer interactions for my business.",
       businessName: businessName || '',
       brandTone: brandTone || 'professional',
       emojiAllowed: emojiAllowed !== false,
@@ -152,6 +175,7 @@ const updateConfiguration = async (req, res) => {
     const { id } = req.params;
     const { 
       configName, 
+      systemPrompt,
       businessName, 
       brandTone, 
       emojiAllowed, 
@@ -200,6 +224,7 @@ const updateConfiguration = async (req, res) => {
 
     // Update fields
     if (configName) config.configName = configName.trim();
+    if (systemPrompt) config.systemPrompt = systemPrompt;
     if (businessName !== undefined) config.businessName = businessName;
     if (brandTone) config.brandTone = brandTone;
     if (emojiAllowed !== undefined) config.emojiAllowed = emojiAllowed;
