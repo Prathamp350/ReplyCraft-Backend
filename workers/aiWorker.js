@@ -155,7 +155,7 @@ async function processReplyJob(job) {
       wasPosted: false
     });
 
-    if (generated.replyMode === 'auto' && connectionDoc?.isActive) {
+    if (generated.effectiveReplyMode === 'auto' && connectionDoc?.isActive) {
       if (generated.replyDelayMinutes > 0) {
         review.replyStatus = 'approved';
         review.status = 'pending_approval';
@@ -202,7 +202,8 @@ async function processReplyJob(job) {
 
     logger.logAI('AI job completed', {
       reviewId,
-      replyMode: generated.replyMode,
+      replyMode: generated.effectiveReplyMode,
+      requiresManualApproval: generated.requiresManualApproval,
       status: review.replyStatus,
     });
 

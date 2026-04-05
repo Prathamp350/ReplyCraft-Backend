@@ -36,6 +36,16 @@ const restaurantProfileSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+  manualApprovalBelowRatingEnabled: {
+    type: Boolean,
+    default: false
+  },
+  manualApprovalBelowRating: {
+    type: Number,
+    default: null,
+    min: 1,
+    max: 5
+  },
   isActive: {
     type: Boolean,
     default: true

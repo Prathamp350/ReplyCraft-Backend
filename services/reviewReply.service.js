@@ -52,6 +52,19 @@ async function generateReplyForReview({ review, user, connection = null }) {
     getRestaurantProfile(user._id),
   ]);
 
+  const configuredReplyMode = aiConfiguration?.replyMode || 'manual';
+  const manualApprovalThreshold =
+    user.plan !== 'free' &&
+    restaurantProfile?.manualApprovalBelowRatingEnabled &&
+    Number.isFinite(restaurantProfile?.manualApprovalBelowRating)
+      ? Number(restaurantProfile.manualApprovalBelowRating)
+      : null;
+
+  const requiresManualApproval =
+    manualApprovalThreshold !== null &&
+    Number.isFinite(review.rating) &&
+    review.rating <= manualApprovalThreshold;
+
   const reusableReply = await findReusableReply({
     userId: user._id,
     aiConfigurationId: aiConfiguration?._id || null,
@@ -72,8 +85,12 @@ async function generateReplyForReview({ review, user, connection = null }) {
       replyText: cachedReply,
       aiConfiguration,
       restaurantProfile,
-      replyMode: aiConfiguration?.replyMode || 'manual',
+      replyMode: configuredReplyMode,
+      effectiveReplyMode:
+        configuredReplyMode === 'auto' && requiresManualApproval ? 'manual' : configuredReplyMode,
       replyDelayMinutes: aiConfiguration?.replyDelayMinutes || 0,
+      requiresManualApproval,
+      manualApprovalThreshold,
       reusedFromCache: true,
       cacheMatchType: reusableReply.matchType,
       cacheId: reusableReply.cacheId,
@@ -104,8 +121,12 @@ async function generateReplyForReview({ review, user, connection = null }) {
     replyText,
     aiConfiguration,
     restaurantProfile,
-    replyMode: aiConfiguration?.replyMode || 'manual',
+    replyMode: configuredReplyMode,
+    effectiveReplyMode:
+      configuredReplyMode === 'auto' && requiresManualApproval ? 'manual' : configuredReplyMode,
     replyDelayMinutes: aiConfiguration?.replyDelayMinutes || 0,
+    requiresManualApproval,
+    manualApprovalThreshold,
     reusedFromCache: false,
     cacheMatchType: null,
     cacheId: null,

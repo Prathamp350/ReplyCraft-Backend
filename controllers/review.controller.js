@@ -18,6 +18,7 @@ const getReviews = async (req, res) => {
       platform, 
       status, 
       sentiment,
+      rating,
       page = 1, 
       limit = 20,
       sortBy = 'createdAt',
@@ -30,6 +31,7 @@ const getReviews = async (req, res) => {
     if (platform) query.platform = platform;
     if (status) query.replyStatus = status;
     if (sentiment) query.sentiment = sentiment;
+    if (rating) query.rating = Number(rating);
 
     // Get total count
     const total = await Review.countDocuments(query);

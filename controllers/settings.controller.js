@@ -28,6 +28,10 @@ const getSettings = async (req, res) => {
       replyMode: profile?.replyMode || 'manual',
       replyDelay: profile?.replyDelayMinutes ? `${profile.replyDelayMinutes}m` : '0m',
       autoReply: profile?.replyMode === 'auto',
+      manualApprovalBelowRatingEnabled:
+        user?.plan !== 'free' ? profile?.manualApprovalBelowRatingEnabled ?? false : false,
+      manualApprovalBelowRating:
+        user?.plan !== 'free' ? profile?.manualApprovalBelowRating ?? null : null,
       emailNotifications: user?.notifications?.email ?? true,
       negativeAlerts: user?.notifications?.negativeAlerts ?? true
     });
@@ -48,7 +52,7 @@ const updateSettings = async (req, res) => {
   try {
     const { 
       businessName, brandTone, replyLanguage, useEmojis, 
-      replyMode, replyDelay, autoReply 
+      replyMode, replyDelay, autoReply, manualApprovalBelowRatingEnabled, manualApprovalBelowRating
     } = req.body;
 
     const user = await User.findById(req.userId);
@@ -72,6 +76,33 @@ const updateSettings = async (req, res) => {
     if (brandTone) profile.brandTone = brandTone;
     if (useEmojis !== undefined) profile.emojiAllowed = useEmojis;
     if (replyMode) profile.replyMode = replyMode === 'auto' ? 'auto' : 'manual';
+
+    if (manualApprovalBelowRatingEnabled !== undefined || manualApprovalBelowRating !== undefined) {
+      if (user?.plan === 'free') {
+        return res.status(403).json({
+          success: false,
+          error: 'Manual approval by rating is available only on paid plans.'
+        });
+      }
+
+      const normalizedThreshold =
+        manualApprovalBelowRating === null || manualApprovalBelowRating === undefined || manualApprovalBelowRating === ''
+          ? null
+          : Number(manualApprovalBelowRating);
+
+      if (
+        normalizedThreshold !== null &&
+        (!Number.isFinite(normalizedThreshold) || normalizedThreshold < 1 || normalizedThreshold > 5)
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'Manual approval rating threshold must be between 1 and 5.'
+        });
+      }
+
+      profile.manualApprovalBelowRatingEnabled = Boolean(manualApprovalBelowRatingEnabled) && normalizedThreshold !== null;
+      profile.manualApprovalBelowRating = profile.manualApprovalBelowRatingEnabled ? normalizedThreshold : null;
+    }
     
     await profile.save();
 
