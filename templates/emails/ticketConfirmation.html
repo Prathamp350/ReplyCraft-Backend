@@ -1,44 +1,60 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <style>
-    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { text-align: center; margin-bottom: 30px; }
-    .content { background: #fff; padding: 30px; border-radius: 8px; border: 1px solid #eaeaea; }
-    h1 { color: #111; font-size: 24px; margin-top: 0; }
-    .ticket-box { background-color: #f0fdf4; border: 1px solid #86efac; padding: 15px; border-radius: 6px; text-align: center; margin: 20px 0; font-size: 28px; font-weight: bold; letter-spacing: 2px; color: #16a34a; }
-    .details { background: #f9fafb; border-radius: 6px; padding: 15px; margin: 20px 0; }
-    .details p { margin: 4px 0; font-size: 14px; }
-    .details strong { color: #111; }
-    .footer { text-align: center; margin-top: 30px; color: #888; font-size: 14px; }
-  </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Support Ticket Created</title>
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h2>ReplyCraft AI</h2>
-    </div>
-    <div class="content">
-      <h1>Support Ticket Created</h1>
-      <p>Hello {{name}},</p>
-      <p>We've received your support request and created a ticket. Our team will review it and get back to you as soon as possible.</p>
-
-      <div class="ticket-box">
-        {{ticketId}}
+<body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#14213d;">
+  <div style="max-width:640px;margin:0 auto;padding:32px 20px;">
+    <div style="border:1px solid #e5ebf5;border-radius:24px;overflow:hidden;background:#ffffff;box-shadow:0 12px 40px rgba(15,23,42,0.08);">
+      <div style="padding:30px 32px;background:linear-gradient(135deg,#3b41f1,#1aa5d8);color:#ffffff;">
+        <div style="font-size:12px;letter-spacing:0.16em;text-transform:uppercase;opacity:0.82;">ReplyCraft Support</div>
+        <h1 style="margin:12px 0 8px;font-size:28px;line-height:1.2;">Your support ticket is in.</h1>
+        <p style="margin:0;font-size:15px;line-height:1.7;opacity:0.92;">
+          The ReplyCraft AI Assistant has passed your request to our support team for review.
+        </p>
       </div>
 
-      <div class="details">
-        <p><strong>Subject:</strong> {{subject}}</p>
-        <p><strong>Status:</strong> Open</p>
-        <p><strong>Priority:</strong> {{priority}}</p>
-      </div>
+      <div style="padding:32px;">
+        <p style="margin:0 0 16px;font-size:16px;">Hi {{name}},</p>
+        <p style="margin:0 0 18px;font-size:15px;line-height:1.75;color:#42526b;">
+          We received your request and created a support ticket successfully. Our team will review the details and follow up as soon as possible.
+        </p>
 
-      <p>You can reference this ticket ID in any future communication about this request. We typically respond within 24–48 hours.</p>
-      <p>Best regards,<br>The ReplyCraft Team</p>
+        <div style="margin:24px 0;padding:22px;border-radius:20px;background:linear-gradient(180deg,#f7fbff,#eef5ff);border:1px solid #d9e7ff;text-align:center;">
+          <div style="font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:#5d6985;">Ticket ID</div>
+          <div style="margin-top:10px;font-size:30px;line-height:1.2;font-weight:700;letter-spacing:0.12em;color:#2343d1;">
+            {{ticketId}}
+          </div>
+        </div>
+
+        <div style="margin:24px 0 0;padding:18px 20px;border-radius:18px;background:#f8fafc;border:1px solid #e7edf6;">
+          <p style="margin:0 0 10px;font-size:14px;font-weight:700;color:#14213d;">What happens next</p>
+          <p style="margin:0 0 8px;font-size:14px;line-height:1.7;color:#4a5972;">
+            We have received your request successfully. Please keep this ticket ID for future communication.
+          </p>
+          <p style="margin:0;font-size:14px;line-height:1.7;color:#4a5972;">
+            Our team will review your message and contact you as soon as possible.
+          </p>
+        </div>
+
+        <div style="margin-top:28px;">
+          <a href="mailto:support@replycraft.co.in?subject=ReplyCraft%20Support%20{{ticketId}}" style="display:inline-block;padding:13px 20px;border-radius:999px;background:linear-gradient(135deg,#3b41f1,#1aa5d8);color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">
+            Contact Support
+          </a>
+        </div>
+
+        <p style="margin:28px 0 0;font-size:14px;line-height:1.7;color:#5d6985;">
+          Thanks,<br />
+          The ReplyCraft Support Team
+        </p>
+      </div>
     </div>
-    <div class="footer">
-      <p>&copy; {{year}} ReplyCraft AI. All rights reserved.</p>
+
+    <div style="padding:18px 8px 0;text-align:center;font-size:12px;line-height:1.7;color:#718096;">
+      <p style="margin:0;">This is a service email related to your support request.</p>
+      <p style="margin:6px 0 0;">&copy; {{year}} ReplyCraft. All rights reserved.</p>
     </div>
   </div>
 </body>
