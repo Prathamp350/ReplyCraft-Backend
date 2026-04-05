@@ -1,44 +1,17 @@
-const axios = require('axios');
-const config = require('../config/config');
-
-const ollamaBaseUrl = config.ollama.baseUrl;
+const googleAIService = require('./googleAi.service');
 
 /**
- * Send prompt to Ollama API and get response
+ * Legacy compatibility shim.
+ * Older parts of the backend still import ollama.service.js, but the project
+ * now uses Google AI. Keep this module alive so those imports do not crash the app.
  */
 async function generateReply(model, prompt) {
-  try {
-    const response = await axios.post(`${ollamaBaseUrl}/api/generate`, {
-      model: model,
-      prompt: prompt,
-      stream: false,
-      options: {
-        temperature: config.ollama.temperature,
-        num_predict: config.ollama.maxTokens
-      }
-    }, {
-      timeout: 60000,
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
-
-    return response.data.response;
-  } catch (error) {
-    console.error('Ollama API Error:', error.message);
-    
-    if (error.code === 'ECONNREFUSED') {
-      throw new Error('Ollama service is not running. Please start Ollama.');
-    }
-    
-    if (error.response) {
-      throw new Error(`Ollama API error: ${error.response.status} - ${error.response.data?.error || 'Unknown error'}`);
-    }
-    
-    throw new Error('Failed to generate reply from Ollama');
-  }
+  return googleAIService.generateText({
+    model: model || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro',
+    prompt,
+  });
 }
 
 module.exports = {
-  generateReply
+  generateReply,
 };
