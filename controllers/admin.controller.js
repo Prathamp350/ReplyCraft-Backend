@@ -244,7 +244,7 @@ module.exports = {
       const { id } = req.params;
       const { plan } = req.body;
 
-      if (!baseConfig.validPlans.includes(plan)) {
+      if (!Object.keys(getConfig().plans).includes(plan)) {
         return res.status(400).json({ success: false, error: 'Invalid plan selected' });
       }
 

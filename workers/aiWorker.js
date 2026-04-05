@@ -1,225 +1,238 @@
-const { Worker, Job } = require('bullmq');
-const IORedis = require('ioredis');
+const { Worker } = require('bullmq');
 const Review = require('../models/Review');
 const User = require('../models/User');
-const RestaurantProfile = require('../models/RestaurantProfile');
-const ollamaService = require('../services/ollama.service');
-const promptService = require('../services/prompt.service');
-const cleanReplyUtil = require('../utils/cleanReply');
-const config = require('../config/config');
+const BusinessConnection = require('../models/BusinessConnection');
+const platformManager = require('../integrations/platformManager');
+const { generateReplyForReview } = require('../services/reviewReply.service');
+const { queueReplyGeneration } = require('../queues/reply.queue');
+const { storeReplyTemplate } = require('../services/replyReuse.service');
 const logger = require('../utils/logger');
-
-// Import platform services
-const googleReviewsService = require('../services/googleReviews.service');
-
 const createRedisConnection = require('../config/redis');
 
 let aiWorker = null;
 
-// Only start if Redis is available
 const connection = createRedisConnection();
 
-connection.on('error', () => {}); // suppress — handled by retryStrategy
+connection.on('error', () => {});
 
 connection.on('ready', () => {
-  logger.info('[AIWorker] Redis connected — starting AI Worker');
+  logger.info('[AIWorker] Redis connected, starting AI worker');
 });
 
 const isRedisReachable = () => connection.status === 'ready';
 
-// Defer worker creation until after initial connection attempt
 setTimeout(() => {
   if (!isRedisReachable()) {
-    logger.warn('[AIWorker] Redis not available — AI Worker disabled (dev mode)');
+    logger.warn('[AIWorker] Redis not available, AI worker disabled');
     return;
   }
 
-  aiWorker = new Worker('reply-generation', async (job) => {
-    await processReplyJob(job);
-  }, {
-    connection,
-    concurrency: 3,
-    limiter: { max: 10, duration: 1000 }
-  });
+  aiWorker = new Worker(
+    'reply-generation',
+    async (job) => {
+      await processReplyJob(job);
+    },
+    {
+      connection,
+      concurrency: 3,
+      limiter: { max: 10, duration: 1000 },
+    }
+  );
 
   aiWorker.on('completed', (job) => logger.logAI('Job completed', { jobId: job.id }));
   aiWorker.on('failed', (job, err) => logger.error('Job failed', { jobId: job?.id, error: err.message }));
   aiWorker.on('error', (error) => logger.error('Worker error', { error: error.message }));
 
-  logger.info('[AIWorker] AI Worker started', { concurrency: 3 });
+  logger.info('[AIWorker] AI worker started', { concurrency: 3 });
 }, 3000);
 
-/**
- * Process a reply generation job
- */
 async function processReplyJob(job) {
-  const { reviewId, userId, platform, entityType, reviewText, rating } = job.data;
-  
-  logger.logAI('AI job started', { jobId: job.id, reviewId, platform });
+  const {
+    reviewId,
+    userId,
+    platform,
+    action = 'generateReply',
+    replyText: queuedReplyText = null,
+  } = job.data;
+
+  logger.logAI('AI job started', { jobId: job.id, reviewId, platform, action });
 
   try {
-    // Fetch review from database
-    const review = await Review.findOne({ reviewId });
-    
+    const review = await Review.findOne({ reviewId, userId });
+
     if (!review) {
-      logger.logAI('Review not found, skipping', { reviewId });
+      logger.logAI('Review not found, skipping', { reviewId, userId });
       return;
     }
 
-    // Check if already processed
-    if (review.status === 'processed' || review.status === 'pending_approval') {
-      logger.logAI('Review already processed, skipping', { reviewId, status: review.status });
+    if (action === 'generateReply' && review.replyStatus === 'posted') {
+      logger.logAI('Review already posted, skipping generation', { reviewId });
       return;
     }
 
-    // Get user
     const user = await User.findById(userId);
-    
+
     if (!user || !user.isActive) {
       logger.warn('[AIWorker] User not found or inactive', { userId });
-      await Review.findByIdAndUpdate(review._id, { status: 'failed' });
+      await Review.findByIdAndUpdate(review._id, { status: 'failed', replyStatus: 'failed' });
       return;
     }
 
-    // Fetch restaurant profile for reply settings
-    let restaurantProfile = null;
-    try {
-      restaurantProfile = await RestaurantProfile.findOne({ 
-        userId, 
-        isActive: true 
-      });
-    } catch (error) {
-      logger.info('No restaurant profile found, using defaults', { userId });
-    }
+    const connectionDoc = review.connectionId
+      ? await BusinessConnection.findById(review.connectionId)
+      : null;
 
-    // Determine reply mode
-    const replyMode = restaurantProfile?.replyMode || 'auto';
-
-    // Check monthly usage limit
     const usageInfo = user.checkMonthlyLimit();
-    
     if (usageInfo.exceeded) {
-      logger.warn('Monthly AI usage limit exceeded', { userId, limit: usageInfo.limit, used: usageInfo.used });
-      await Review.findByIdAndUpdate(review._id, { status: 'ignored' });
+      logger.warn('Monthly AI usage limit exceeded', {
+        userId,
+        limit: usageInfo.limit,
+        used: usageInfo.used,
+      });
+      await Review.findByIdAndUpdate(review._id, { status: 'ignored', replyStatus: 'failed' });
       return;
     }
 
-    // Generate AI reply
-    const prompt = promptService.buildPrompt(reviewText, restaurantProfile);
-    const rawReply = await ollamaService.generateReply(config.ollama.defaultModel, prompt);
-    let replyText = cleanReplyUtil.cleanReply(rawReply);
+    if (action === 'postReply') {
+      const outgoingReply = queuedReplyText || review.replyText || review.aiReply;
 
-    if (user.plan === 'free') {
-      replyText += '\n\n*Powered by ReplyCraft*';
+      if (!outgoingReply) {
+        throw new Error('No reply text available to post.');
+      }
+
+      if (!connectionDoc || !connectionDoc.isActive) {
+        throw new Error('Active connection not found for reply posting.');
+      }
+
+      await platformManager.postReply(connectionDoc, review.platformReviewId, outgoingReply);
+
+      review.replyText = outgoingReply;
+      review.replyStatus = 'posted';
+      review.status = 'processed';
+      review.replyPostedAt = new Date();
+      await review.save();
+
+      await storeReplyTemplate({
+        userId: review.userId,
+        aiConfigurationId: connectionDoc?.aiConfigurationId || null,
+        platform: review.platform,
+        rating: review.rating,
+        reviewText: review.reviewText,
+        replyText: outgoingReply,
+        sourceReviewId: review.reviewId,
+        sourceConnectionId: review.connectionId,
+        wasPosted: true
+      });
+
+      logger.logAI('Reply posted from queue', { reviewId, platform });
+      return { success: true, reviewId, status: 'posted' };
     }
 
-    // Handle based on reply mode and platform
-    if (replyMode === 'auto') {
-      // Post reply to platform
-      await postReplyToPlatform(platform, review, replyText);
-      
-      await Review.findByIdAndUpdate(review._id, {
-        replyText,
-        status: 'processed',
-        replyPostedAt: new Date()
-      });
-      
-      logger.logAI('AI reply generated and posted', { reviewId, status: 'processed' });
+    const generated = await generateReplyForReview({
+      review,
+      user,
+      connection: connectionDoc,
+    });
+
+    review.aiReply = generated.replyText;
+    review.replyText = generated.replyMode === 'auto' ? generated.replyText : review.replyText;
+    review.sentiment =
+      review.rating >= 4 ? 'positive' : review.rating <= 2 ? 'negative' : 'neutral';
+
+    const storedBytes =
+      Buffer.byteLength(review.reviewText || '', 'utf8') +
+      Buffer.byteLength(generated.replyText || '', 'utf8');
+
+    await storeReplyTemplate({
+      userId: review.userId,
+      aiConfigurationId: generated.aiConfiguration?._id || connectionDoc?.aiConfigurationId || null,
+      platform: review.platform,
+      rating: review.rating,
+      reviewText: review.reviewText,
+      replyText: generated.replyText,
+      sourceReviewId: review.reviewId,
+      sourceConnectionId: review.connectionId,
+      wasPosted: false
+    });
+
+    if (generated.replyMode === 'auto' && connectionDoc?.isActive) {
+      if (generated.replyDelayMinutes > 0) {
+        review.replyStatus = 'approved';
+        review.status = 'pending_approval';
+        await review.save();
+
+        await queueReplyGeneration({
+          reviewId: review.reviewId,
+          userId: userId.toString(),
+          platform: review.platform,
+          entityType: review.entityType,
+          reviewText: review.reviewText,
+          rating: review.rating,
+          replyText: generated.replyText,
+          action: 'postReply',
+          delayMs: generated.replyDelayMinutes * 60 * 1000,
+        });
+      } else {
+        await platformManager.postReply(connectionDoc, review.platformReviewId, generated.replyText);
+        review.replyStatus = 'posted';
+        review.status = 'processed';
+        review.replyPostedAt = new Date();
+        await review.save();
+
+        await storeReplyTemplate({
+          userId: review.userId,
+          aiConfigurationId: generated.aiConfiguration?._id || connectionDoc?.aiConfigurationId || null,
+          platform: review.platform,
+          rating: review.rating,
+          reviewText: review.reviewText,
+          replyText: generated.replyText,
+          sourceReviewId: review.reviewId,
+          sourceConnectionId: review.connectionId,
+          wasPosted: true
+        });
+      }
     } else {
-      // Manual mode - save for approval
-      await Review.findByIdAndUpdate(review._id, {
-        replyText,
-        status: 'pending_approval'
-      });
-      
-      logger.logAI('AI reply generated, awaiting approval', { reviewId, status: 'pending_approval' });
+      review.replyStatus = 'pending';
+      review.status = 'pending_approval';
+      await review.save();
     }
 
-    // Increment usage
     await user.incrementUsage();
-    
-    logger.logAI('AI job completed', { reviewId, replyMode });
-    
-    return { success: true, reviewId, status: replyMode === 'auto' ? 'processed' : 'pending_approval' };
+    await user.addStorageUsage(storedBytes);
 
+    logger.logAI('AI job completed', {
+      reviewId,
+      replyMode: generated.replyMode,
+      status: review.replyStatus,
+    });
+
+    return { success: true, reviewId, status: review.replyStatus };
   } catch (error) {
-    logger.error('AI job failed', { jobId: job.id, reviewId, error: error.message, stack: error.stack });
-    
-    // Update review status to failed
+    logger.error('AI job failed', {
+      jobId: job.id,
+      reviewId,
+      error: error.message,
+      stack: error.stack,
+    });
+
     try {
       await Review.findOneAndUpdate(
         { reviewId },
-        { status: 'failed' }
+        { status: 'failed', replyStatus: 'failed' }
       );
     } catch (updateError) {
-      logger.error('Failed to update review status', { reviewId, error: updateError.message });
+      logger.error('Failed to update review status', {
+        reviewId,
+        error: updateError.message,
+      });
     }
-    
-    throw error; // Re-throw to trigger retry
-  }
-}
 
-/**
- * Post reply to the appropriate platform
- */
-async function postReplyToPlatform(platform, review, replyText) {
-  switch (platform) {
-    case 'google':
-      await postToGoogle(review, replyText);
-      break;
-    case 'yelp':
-      await postToYelp(review, replyText);
-      break;
-    case 'tripadvisor':
-      await postToTripAdvisor(review, replyText);
-      break;
-    case 'appstore':
-    case 'playstore':
-      // App store reviews typically don't support replies via API
-      logger.info(`Platform ${platform} doesn't support API replies`);
-      break;
-    default:
-      logger.warn(`Unknown platform: ${platform}`);
-  }
-}
-
-/**
- * Post reply to Google
- */
-async function postToGoogle(review, replyText) {
-  try {
-    const BusinessConnection = require('../models/BusinessConnection');
-    const connection = await BusinessConnection.findById(review.connectionId);
-    
-    if (connection && connection.isActive) {
-      await googleReviewsService.postReply(connection, review.reviewId, replyText);
-      logger.logAI('Reply posted to Google', { reviewId: review.reviewId });
-    }
-  } catch (error) {
-    logger.error('Error posting to Google', { reviewId: review.reviewId, error: error.message });
     throw error;
   }
 }
 
-/**
- * Post reply to Yelp
- */
-async function postToYelp(review, replyText) {
-  // TODO: Implement Yelp API integration
-  logger.info('Yelp integration not implemented yet');
-}
-
-/**
- * Post reply to TripAdvisor
- */
-async function postToTripAdvisor(review, replyText) {
-  // TODO: Implement TripAdvisor API integration
-  logger.info('TripAdvisor integration not implemented yet');
-}
-
-// Graceful shutdown
 const gracefulShutdown = async () => {
-  logger.info('AI Worker shutting down gracefully');
+  logger.info('AI worker shutting down gracefully');
   if (aiWorker) await aiWorker.close();
   process.exit(0);
 };
@@ -229,5 +242,5 @@ process.on('SIGINT', gracefulShutdown);
 
 module.exports = {
   aiWorker,
-  processReplyJob
+  processReplyJob,
 };

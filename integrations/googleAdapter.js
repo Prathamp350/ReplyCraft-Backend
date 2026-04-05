@@ -130,21 +130,28 @@ class GoogleAdapter extends BaseAdapter {
   async fetchReviews(connection) {
     try {
       const accessToken = await this.getValidAccessToken(connection);
-      const locationId = connection.locationId;
+      const reviews = [];
+      let pageToken = null;
 
-      const response = await axios.get(
-        `${this.baseUrl}/accounts/${connection.accountId}/locations/${locationId}/reviews`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`
-          },
-          params: {
-            pageSize: 50
+      do {
+        const response = await axios.get(
+          `${this.baseUrl}/accounts/${connection.accountId}/locations/${connection.locationId}/reviews`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`
+            },
+            params: {
+              pageSize: 50,
+              ...(pageToken ? { pageToken } : {})
+            }
           }
-        }
-      );
+        );
 
-      return response.data.reviews || [];
+        reviews.push(...(response.data.reviews || []));
+        pageToken = response.data.nextPageToken || null;
+      } while (pageToken);
+
+      return reviews;
     } catch (error) {
       console.error('Error fetching Google reviews:', error.message);
       
@@ -164,7 +171,7 @@ class GoogleAdapter extends BaseAdapter {
     try {
       const accessToken = await this.getValidAccessToken(connection);
 
-      const response = await axios.post(
+      const response = await axios.put(
         `${this.baseUrl}/accounts/${connection.accountId}/locations/${connection.locationId}/reviews/${reviewId}/reply`,
         { comment: replyText },
         {

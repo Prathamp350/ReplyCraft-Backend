@@ -6,7 +6,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth.middleware');
-const { requirePremium, checkDailyLimit } = require('../middleware/premium.middleware');
+const { checkDailyLimit } = require('../middleware/premium.middleware');
 const {
   getReviews,
   getReview,
@@ -21,8 +21,8 @@ const {
 router.get('/', authenticate, getReviews);
 router.get('/:id', authenticate, getReview);
 
-// Actions - some require premium
-router.post('/:id/generate', authenticate, requirePremium, checkDailyLimit, generateReply);
+// Actions - all plans can generate replies up to their configured limits
+router.post('/:id/generate', authenticate, checkDailyLimit, generateReply);
 router.post('/:id/approve', authenticate, approveReply);
 router.put('/:id/edit', authenticate, updateReply);
 router.post('/:id/send', authenticate, sendReply);

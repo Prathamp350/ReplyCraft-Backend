@@ -21,14 +21,21 @@ function detectTone(review) {
 /**
  * Build optimized prompt for reply generation with restaurant profile context
  */
-function buildPrompt(review, restaurantProfile = null) {
+function buildPrompt(review, restaurantProfile = null, aiConfiguration = null, metadata = {}) {
   const tone = detectTone(review);
 
   // Default values if no profile
-  const restaurantName = restaurantProfile?.restaurantName || 'our restaurant';
+  const restaurantName =
+    metadata.businessName ||
+    aiConfiguration?.businessName ||
+    restaurantProfile?.restaurantName ||
+    'our business';
   const cuisineType = restaurantProfile?.cuisineType || '';
-  const brandTone = restaurantProfile?.brandTone || 'professional';
-  const emojiAllowed = restaurantProfile?.emojiAllowed || false;
+  const brandTone = aiConfiguration?.brandTone || restaurantProfile?.brandTone || 'professional';
+  const emojiAllowed = aiConfiguration?.emojiAllowed ?? restaurantProfile?.emojiAllowed ?? false;
+  const authorName = metadata.author || 'the customer';
+  const rating = metadata.rating ? `${metadata.rating}/5` : 'unknown';
+  const platform = metadata.platform || 'review platform';
 
   // Build cuisine context
   const cuisineContext = cuisineType ? `Cuisine type: ${cuisineType}\n` : '';
@@ -45,13 +52,15 @@ function buildPrompt(review, restaurantProfile = null) {
     friendly: 'Use a warm, friendly tone. Be enthusiastic and personable.'
   };
 
-  const prompt = `You are writing a reply for the restaurant "${restaurantName}".
+  const prompt = `You are writing a reply for "${restaurantName}" on ${platform}.
 
 ${cuisineContext}Brand tone: ${brandTone}
 ${toneInstructions[brandTone]}
 ${emojiInstruction}
 
 Tone: ${tone}
+Reviewer: ${authorName}
+Rating: ${rating}
 
 Write a short natural reply to the customer review.
 
@@ -59,6 +68,7 @@ Rules:
 - Maximum 2 sentences
 - Thank the customer
 - Address the feedback
+- Sound like a real business owner, not a bot
 - No signatures
 - No placeholders
 - No brackets

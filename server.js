@@ -23,6 +23,7 @@ const dashboardRoutes = require('./routes/dashboard.routes');
 const contactRoutes = require('./routes/contact.routes');
 const adminRoutes = require('./routes/admin.routes');
 const ticketRoutes = require('./routes/ticket.routes');
+const trackingRoutes = require('./routes/tracking.routes');
 const path = require('path');
 const fs = require('fs');
 const logger = require('./utils/logger');
@@ -34,6 +35,7 @@ const { syncAllSubscriptions } = require('./controllers/webhook.controller');
 const { authenticate } = require('./middleware/auth.middleware');
 const { bullBoardRouter } = require('./config/bullBoard');
 const { loadConfig } = require('./services/configManager');
+const { protectForwardedHeaders } = require('./middleware/requestSecurity.middleware');
 
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:8080',
@@ -90,6 +92,7 @@ if (!fs.existsSync(uploadsDir)) {
 // Initialize cron jobs
 require('./cron/resetUsage');
 require('./cron/queueMetrics');
+require('./cron/subscriptionNotifications');
 
 // Import workers (they self-initialize)
 require('./workers/reviewFetcher');
@@ -111,6 +114,7 @@ app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet());
+app.use(protectForwardedHeaders);
 
 // CORS configuration
 app.use(cors({
@@ -186,6 +190,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/tickets', ticketRoutes);
+app.use('/api/tracking', trackingRoutes);
 
 // Bull Board - Queue Monitoring UI (only in development)
 if (process.env.NODE_ENV !== 'production' && bullBoardRouter) {

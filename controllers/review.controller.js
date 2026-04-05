@@ -6,6 +6,8 @@
 const Review = require('../models/Review');
 const { queueReplyGeneration } = require('../queues/reply.queue');
 const logger = require('../utils/logger');
+const BusinessConnection = require('../models/BusinessConnection');
+const { storeReplyTemplate } = require('../services/replyReuse.service');
 
 /**
  * Get all reviews for logged-in user
@@ -122,10 +124,37 @@ const approveReply = async (req, res) => {
       });
     }
 
-    // Update reply status to approved
+    // Update reply status to approved and queue posting
     review.replyStatus = 'approved';
-    review.replyText = review.aiReply;
+    review.replyText = review.replyText || review.aiReply;
     await review.save();
+
+    const connection = review.connectionId
+      ? await BusinessConnection.findById(review.connectionId).select('aiConfigurationId')
+      : null;
+
+    await storeReplyTemplate({
+      userId: review.userId,
+      aiConfigurationId: connection?.aiConfigurationId || null,
+      platform: review.platform,
+      rating: review.rating,
+      reviewText: review.reviewText,
+      replyText: review.replyText,
+      sourceReviewId: review.reviewId,
+      sourceConnectionId: review.connectionId,
+      wasPosted: false
+    });
+
+    await queueReplyGeneration({
+      reviewId: review.reviewId,
+      userId: req.userId.toString(),
+      platform: review.platform,
+      entityType: review.entityType,
+      reviewText: review.reviewText,
+      rating: review.rating,
+      replyText: review.replyText,
+      action: 'postReply'
+    });
 
     logger.info('Reply approved', { 
       reviewId: review._id, 
@@ -134,7 +163,7 @@ const approveReply = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Reply approved successfully',
+      message: 'Reply approved and queued for posting',
       review
     });
 
@@ -322,8 +351,8 @@ const generateReply = async (req, res) => {
       action: 'generateReply'
     });
 
-    // Update status
-    review.status = 'pending_approval';
+    // Keep review pending while worker generates the AI reply
+    review.status = 'pending';
     await review.save();
 
     logger.info('AI reply generation queued', { 

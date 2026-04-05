@@ -1,10 +1,7 @@
-const ollamaService = require('../services/ollama.service');
-const promptService = require('../services/prompt.service');
-const cleanReplyUtil = require('../utils/cleanReply');
-const { getConfig } = require('../services/configManager');
-const RestaurantProfile = require('../models/RestaurantProfile');
 const logger = require('../utils/logger');
 const { queueLimitReachedEmail } = require('../queues/email.queue');
+const Review = require('../models/Review');
+const { generateReplyForReview } = require('../services/reviewReply.service');
 
 /**
  * Generate professional reply to customer review (direct AI generation)
@@ -82,43 +79,26 @@ const generateReply = async (req, res) => {
       });
     }
 
-    // Validate model if provided
-    const requestedModel = model && config.allowedModels.includes(model.toLowerCase())
-      ? model.toLowerCase()
-      : config.ollama.defaultModel;
-
-    // Fetch restaurant profile if exists
-    let restaurantProfile = null;
-    try {
-      restaurantProfile = await RestaurantProfile.findOne({ 
-        userId: user._id, 
-        isActive: true 
-      });
-    } catch (error) {
-      // Continue without profile if lookup fails
-      logger.info('No restaurant profile found, using defaults', { userId: user._id });
-    }
-
-    // Build prompt with restaurant context
-    const prompt = promptService.buildPrompt(review, restaurantProfile);
-
     logger.logAI('AI reply generation started', { 
       userId: user._id, 
-      model: requestedModel,
       reviewLength: review.length
     });
 
-    // Get response from Ollama
-    const rawReply = await ollamaService.generateReply(requestedModel, prompt);
+    const temporaryReview = new Review({
+      reviewId: `direct_${user._id}_${Date.now()}`,
+      userId: user._id,
+      platform: 'google',
+      reviewText: review,
+      rating: 5,
+      author: 'Customer'
+    });
 
-    // Clean the response
-    let reply = cleanReplyUtil.cleanReply(rawReply);
-
-    // Append watermark for Free plan users
-    const planConfig = user.getPlanConfig();
-    if (planConfig.hasWatermark) {
-      reply = reply + getConfig().watermarkText;
-    }
+    const generated = await generateReplyForReview({
+      review: temporaryReview,
+      user,
+      connection: null
+    });
+    const reply = generated.replyText;
 
     // Increment usage counter
     await user.incrementUsage();
@@ -133,7 +113,7 @@ const generateReply = async (req, res) => {
     logger.logAI('AI reply generated successfully', { 
       userId: user._id, 
       remaining: updatedUsage.remaining,
-      watermark: planConfig.hasWatermark,
+      watermark: user.getPlanConfig().hasWatermark,
       storedBytes
     });
 

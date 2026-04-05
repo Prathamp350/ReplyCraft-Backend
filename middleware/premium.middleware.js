@@ -158,11 +158,12 @@ const checkPlatformLimit = async (req, res, next) => {
       return next();
     }
 
-    // Count active connections
-    const activeCount = await BusinessConnection.countDocuments({
+    // Count distinct active platforms, not locations/connections
+    const activePlatforms = await BusinessConnection.distinct('platform', {
       userId: user._id,
       isActive: true
     });
+    const activeCount = activePlatforms.length;
 
     if (activeCount >= planConfig.platformLimit) {
       logger.warn('Platform limit reached', {

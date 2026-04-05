@@ -37,10 +37,20 @@ const replyQueue = new Queue('reply-generation', {
  * IDEMPOTENCY: Uses jobId based on platform + reviewId to prevent duplicate jobs
  */
 async function queueReplyGeneration(data) {
-  const { reviewId, userId, platform, entityType, reviewText, rating } = data;
+  const {
+    reviewId,
+    userId,
+    platform,
+    entityType,
+    reviewText,
+    rating,
+    action = 'generateReply',
+    replyText = null,
+    delayMs = 0
+  } = data;
 
   // IDEMPOTENCY KEY: Create unique job ID to prevent duplicate jobs
-  const jobId = `${platform || 'unknown'}-${reviewId || Date.now()}`;
+  const jobId = `${platform || 'unknown'}-${reviewId || Date.now()}-${action}`;
 
   const job = await replyQueue.add('generateReply', {
     reviewId,
@@ -49,10 +59,13 @@ async function queueReplyGeneration(data) {
     entityType,
     reviewText,
     rating,
+    action,
+    replyText,
     queuedAt: new Date().toISOString()
   }, {
     jobId, // Use unique job ID for deduplication
-    priority: rating <= 2 ? 1 : 2 // Higher priority for negative reviews
+    priority: rating <= 2 ? 1 : 2, // Higher priority for negative reviews
+    ...(delayMs > 0 ? { delay: delayMs } : {})
   });
 
   logger.logAI('Job added to queue', { 
@@ -72,7 +85,8 @@ async function queueReplyGeneration(data) {
 async function queueBulkReplyGeneration(jobs) {
   const bulkJobs = jobs.map((data, index) => {
     // Create unique job ID for deduplication
-    const jobId = `${data.platform || 'unknown'}-${data.reviewId || `${Date.now()}-${index}`}`;
+    const action = data.action || 'generateReply';
+    const jobId = `${data.platform || 'unknown'}-${data.reviewId || `${Date.now()}-${index}`}-${action}`;
     
     return {
       name: 'generateReply',
@@ -81,7 +95,8 @@ async function queueBulkReplyGeneration(jobs) {
         queuedAt: new Date().toISOString()
       },
       jobId, // Unique job ID prevents duplicates
-      priority: data.rating <= 2 ? 1 : 2
+      priority: data.rating <= 2 ? 1 : 2,
+      ...(data.delayMs > 0 ? { delay: data.delayMs } : {})
     };
   });
 

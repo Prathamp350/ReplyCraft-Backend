@@ -11,6 +11,23 @@ const logger = require('../utils/logger');
 
 const getJwtSecret = () => baseConfig?.jwt?.secret || process.env.JWT_SECRET;
 
+const resolveUserFromBearer = async (req) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
+  const token = authHeader.split(' ')[1];
+  if (!token) {
+    return null;
+  }
+
+  const decoded = jwt.verify(token, getJwtSecret());
+  const user = await User.findById(decoded.userId);
+  return user || null;
+};
+
 /**
  * Main authentication middleware
  * Accepts either Firebase ID token or JWT token
@@ -96,6 +113,20 @@ const authenticate = async (req, res, next) => {
   }
 };
 
+const attachUserIfPresent = async (req, res, next) => {
+  try {
+    const user = await resolveUserFromBearer(req);
+    if (user && user.isActive) {
+      req.user = user;
+      req.userId = user._id;
+    }
+  } catch (error) {
+    logger.warn('Optional auth attach failed', { error: error.message });
+  }
+
+  next();
+};
+
 /**
  * Require premium subscription (any paid plan)
  * Use after authenticate middleware
@@ -176,6 +207,7 @@ const authorizeRoles = (...roles) => {
 
 module.exports = {
   authenticate,
+  attachUserIfPresent,
   requirePremium,
   checkUsageLimit,
   authorizeRoles

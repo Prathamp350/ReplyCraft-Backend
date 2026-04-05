@@ -172,6 +172,18 @@ async function processEmailJob(job) {
       subject = `Your ReplyCraft ${data.planName || 'Plan'} Plan is Active`;
       templateName = 'planUpgrade';
       break;
+    case 'subscriptionActivated':
+      subject = `Your ReplyCraft ${data.planName || 'Plan'} subscription is active`;
+      templateName = 'subscriptionActivated';
+      break;
+    case 'subscriptionCanceled':
+      subject = 'Your ReplyCraft subscription has been canceled';
+      templateName = 'subscriptionCanceled';
+      break;
+    case 'subscriptionReminder':
+      subject = `Your ReplyCraft plan ends in ${data.daysRemaining || 10} days`;
+      templateName = 'subscriptionReminder';
+      break;
     case 'test':
       subject = 'ReplyCraft Test Email ✅';
       templateName = 'welcomeEmail';

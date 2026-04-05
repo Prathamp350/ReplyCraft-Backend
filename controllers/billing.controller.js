@@ -15,7 +15,11 @@ const Invoice = require('../models/Invoice');
 const baseConfig = require('../config/config');
 const { getConfig } = require('../services/configManager');
 const logger = require('../utils/logger');
-const { queuePlanUpgradeEmail } = require('../queues/email.queue');
+const {
+  queuePlanUpgradeEmail,
+  queueSubscriptionActivatedEmail,
+  queueSubscriptionCanceledEmail
+} = require('../queues/email.queue');
 
 const isPlaceholderValue = (value = '') =>
   !value || value.startsWith('your_') || value.includes('change_me');
@@ -579,6 +583,21 @@ const verifyPayment = async (req, res) => {
       });
     });
 
+    queueSubscriptionActivatedEmail({
+      to: user.email,
+      name: user.name,
+      planName: plan.name,
+      billingLabel: resolvedBilling === 'yearly' ? 'Yearly billing' : 'Monthly billing',
+      amountPaid: formatInvoiceAmount(invoice.totalAmountPaise, invoice.currency),
+      invoiceNumber: invoice.invoiceNumber,
+      planEndsAt: formatPlanEndDate(user.subscriptionCurrentPeriodEnd),
+    }).catch((queueError) => {
+      logger.error('Failed to queue subscription activated email', {
+        error: queueError.message,
+        userId: user._id,
+      });
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Payment successful! Plan activated.',
@@ -678,6 +697,21 @@ const cancelSubscription = async (req, res) => {
     await user.save();
 
     logger.logBilling('Subscription canceled', { userId: user._id });
+
+    queueSubscriptionCanceledEmail({
+      to: user.email,
+      name: user.name,
+      canceledAt: new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      })
+    }).catch((queueError) => {
+      logger.error('Failed to queue subscription canceled email', {
+        error: queueError.message,
+        userId: user._id
+      });
+    });
 
     return res.status(200).json({
       success: true,

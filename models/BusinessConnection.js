@@ -15,8 +15,7 @@ const businessConnectionSchema = new mongoose.Schema({
   },
   // Platform account identifier
   accountId: {
-    type: String,
-    required: true
+    type: String
   },
   // Location/Business/App identifier
   locationId: {

@@ -65,6 +65,9 @@ function getPriorityForType(type) {
     limitReached: 3,
     integrationConnected: 2,
     planUpgrade: 1,
+    subscriptionActivated: 1,
+    subscriptionCanceled: 1,
+    subscriptionReminder: 1,
     passwordReset: 1,
     test: 1,
     otp: 1
@@ -183,6 +186,27 @@ async function queuePlanUpgradeEmail(data) {
   });
 }
 
+async function queueSubscriptionActivatedEmail(data) {
+  return queueEmail('subscriptionActivated', {
+    type: 'subscriptionActivated',
+    ...data,
+  });
+}
+
+async function queueSubscriptionCanceledEmail(data) {
+  return queueEmail('subscriptionCanceled', {
+    type: 'subscriptionCanceled',
+    ...data,
+  });
+}
+
+async function queueSubscriptionReminderEmail(data) {
+  return queueEmail('subscriptionReminder', {
+    type: 'subscriptionReminder',
+    ...data,
+  });
+}
+
 /**
  * Get email queue stats
  */
@@ -200,5 +224,8 @@ module.exports = {
   queueTestEmail,
   queueOtpEmail,
   queuePlanUpgradeEmail,
+  queueSubscriptionActivatedEmail,
+  queueSubscriptionCanceledEmail,
+  queueSubscriptionReminderEmail,
   getEmailQueueStats
 };

@@ -96,6 +96,10 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  lastSubscriptionReminderSentAt: {
+    type: Date,
+    default: null
+  },
   planExpiresAt: {
     type: Date,
     default: null

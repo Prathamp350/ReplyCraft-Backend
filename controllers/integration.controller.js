@@ -1,47 +1,110 @@
 /**
  * Integration Controller
- * Handles Google Business Profile connections
+ * Handles platform connection, sync, and multi-location Google onboarding
  */
 
+const axios = require('axios');
+const mongoose = require('mongoose');
 const BusinessConnection = require('../models/BusinessConnection');
-const User = require('../models/User');
 const Review = require('../models/Review');
 const platformManager = require('../integrations/platformManager');
-const axios = require('axios');
-const config = require('../config/config');
 const logger = require('../utils/logger');
+const { queueReplyGeneration } = require('../queues/reply.queue');
 
 const AVAILABLE_PLATFORMS = [
-  { id: 'google', platform: 'google', name: 'Google Business Profile', description: 'Connect your Google Business Profile to map real-time customer reviews.', logo: '/platforms/google.svg', category: 'reviews' },
+  { id: 'google', platform: 'google', name: 'Google Business Profile', description: 'Connect your Google Business Profile to sync reviews from every location under the account.', logo: '/platforms/google.svg', category: 'reviews' },
   { id: 'yelp', platform: 'yelp', name: 'Yelp', description: 'Sync Yelp local reviews automatically and track restaurant ratings.', logo: '/platforms/yelp.svg', category: 'reviews' },
   { id: 'tripadvisor', platform: 'tripadvisor', name: 'TripAdvisor', description: 'Bring in your hotel or attraction reviews directly from TripAdvisor.', logo: '/platforms/tripadvisor.svg', category: 'reviews' },
   { id: 'appstore', platform: 'appstore', name: 'Apple App Store', description: 'Monitor iOS app reviews directly from the App Store.', logo: '/platforms/appstore.svg', category: 'app_store' },
   { id: 'playstore', platform: 'playstore', name: 'Google Play Store', description: 'Track Android app ratings and feedback globally.', logo: '/platforms/playstore.svg', category: 'app_store' }
 ];
 
-/**
- * Connect Google Business Profile
- */
+const inferSentiment = (rating) => {
+  if (rating >= 4) return 'positive';
+  if (rating <= 2) return 'negative';
+  return 'neutral';
+};
+
+const ensurePlatformLimit = async (user, userId) => {
+  const planConfig = user.getPlanConfig();
+  if (planConfig.platformLimit === Infinity) {
+    return null;
+  }
+
+  const activePlatforms = await BusinessConnection.distinct('platform', { userId, isActive: true });
+  if (activePlatforms.length >= planConfig.platformLimit) {
+    return {
+      success: false,
+      error: `Your ${planConfig.name} plan supports up to ${planConfig.platformLimit} platform(s). Upgrade to connect more.`,
+      code: 'PLATFORM_LIMIT_REACHED',
+      connected: activePlatforms.length,
+      limit: planConfig.platformLimit,
+      upgradeUrl: '/dashboard/upgrade'
+    };
+  }
+
+  return null;
+};
+
+const getGoogleLocations = async (accessToken) => {
+  const accountsResponse = await axios.get(
+    'https://mybusinessaccountmanagement.googleapis.com/v1/accounts',
+    {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    }
+  );
+
+  const accounts = accountsResponse.data.accounts || [];
+  const locations = [];
+
+  for (const account of accounts) {
+    let pageToken = null;
+
+    do {
+      const locationsResponse = await axios.get(
+        `https://mybusiness.googleapis.com/v4/${account.name}/locations`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          params: {
+            pageSize: 100,
+            ...(pageToken ? { pageToken } : {})
+          }
+        }
+      );
+
+      const batch = locationsResponse.data.locations || locationsResponse.data.locationSummaries || [];
+
+      for (const location of batch) {
+        const locationId = location.name?.split('/').pop() || location.locationKey?.placeId;
+        if (!locationId) continue;
+
+        locations.push({
+          accountId: account.name?.split('/').pop() || account.accountId || account.accountNumber,
+          locationId,
+          locationName:
+            location.locationName ||
+            location.title ||
+            location.storefrontAddress?.addressLines?.[0] ||
+            'Business Location',
+        });
+      }
+
+      pageToken = locationsResponse.data.nextPageToken || null;
+    } while (pageToken);
+  }
+
+  return locations;
+};
+
 const connectGoogle = async (req, res) => {
   try {
-    const { code, redirectUri } = req.body;
+    const { code, redirectUri, aiConfigurationId, businessEmail } = req.body;
     const userId = req.userId;
     const user = req.user;
 
-    // Check platform limit before allowing new connection
-    const planConfig = user.getPlanConfig();
-    if (planConfig.platformLimit !== Infinity) {
-      const activeCount = await BusinessConnection.countDocuments({ userId, isActive: true });
-      if (activeCount >= planConfig.platformLimit) {
-        return res.status(403).json({
-          success: false,
-          error: `Your ${planConfig.name} plan supports up to ${planConfig.platformLimit} platform(s). Upgrade to connect more.`,
-          code: 'PLATFORM_LIMIT_REACHED',
-          connected: activeCount,
-          limit: planConfig.platformLimit,
-          upgradeUrl: '/dashboard/upgrade'
-        });
-      }
+    const platformLimitError = await ensurePlatformLimit(user, userId);
+    if (platformLimitError) {
+      return res.status(403).json(platformLimitError);
     }
 
     if (!code) {
@@ -51,7 +114,6 @@ const connectGoogle = async (req, res) => {
       });
     }
 
-    // Exchange authorization code for tokens
     const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
       code,
       client_id: process.env.GOOGLE_CLIENT_ID,
@@ -61,98 +123,81 @@ const connectGoogle = async (req, res) => {
     });
 
     const { access_token, refresh_token, expires_in } = tokenResponse.data;
+    const locations = await getGoogleLocations(access_token);
 
-    // Get account info using the access token
-    const accountResponse = await axios.get(
-      'https://mybusiness.googleapis.com/v4/accounts',
-      {
-        headers: { Authorization: `Bearer ${access_token}` }
-      }
-    );
-
-    const account = accountResponse.data.accounts?.[0];
-    if (!account) {
+    if (!locations.length) {
       return res.status(400).json({
         success: false,
-        error: 'No Google Business account found'
+        error: 'No Google Business locations found for this account'
       });
     }
 
-    // Get location info
-    const locationResponse = await axios.get(
-      `https://mybusiness.googleapis.com/v4/${account.name}/locations`,
-      {
-        headers: { Authorization: `Bearer ${access_token}` }
-      }
-    );
-
-    const location = locationResponse.data.locationSummaries?.[0];
-
-    // Check if connection already exists
-    let connection = await BusinessConnection.findOne({
-      userId,
-      platform: 'google',
-      locationId: location?.locationId
-    });
-
     const tokenExpiry = new Date(Date.now() + expires_in * 1000);
+    const savedConnections = [];
 
-    if (connection) {
-      // Update existing connection
-      connection.accessToken = access_token;
-      connection.refreshToken = refresh_token;
-      connection.tokenExpiry = tokenExpiry;
-      connection.isActive = true;
-      await connection.save();
-    } else {
-      // Create new connection
-      connection = new BusinessConnection({
+    for (const location of locations) {
+      let connection = await BusinessConnection.findOne({
         userId,
         platform: 'google',
-        accountId: account.accountId,
-        locationId: location?.locationId || 'default',
-        locationName: location?.locationName || 'My Business',
-        accessToken,
-        refreshToken,
-        tokenExpiry,
-        isActive: true
+        locationId: location.locationId
       });
+
+      if (!connection) {
+        connection = new BusinessConnection({
+          userId,
+          platform: 'google',
+          accountId: location.accountId,
+          locationId: location.locationId,
+          locationName: location.locationName
+        });
+      }
+
+      connection.accountId = location.accountId;
+      connection.locationName = location.locationName;
+      connection.accessToken = access_token;
+      connection.refreshToken = refresh_token || connection.refreshToken;
+      connection.tokenExpiry = tokenExpiry;
+      connection.aiConfigurationId = aiConfigurationId || connection.aiConfigurationId || null;
+      connection.config = {
+        ...(connection.config || {}),
+        ...(businessEmail ? { businessEmail } : {})
+      };
+      connection.isActive = true;
+      connection.status = 'active';
       await connection.save();
+      savedConnections.push(connection);
     }
 
     logger.logReview('Google integration connected', {
       userId,
-      locationId: connection.locationId,
-      locationName: connection.locationName
+      locationCount: savedConnections.length
     });
 
     return res.status(200).json({
       success: true,
       message: 'Google Business Profile connected successfully',
-      connection: {
+      locationCount: savedConnections.length,
+      connections: savedConnections.map((connection) => ({
         id: connection._id,
         platform: connection.platform,
         locationName: connection.locationName,
         connectedAt: connection.createdAt
-      }
+      }))
     });
-
   } catch (error) {
     logger.error('Google connect error', {
       error: error.message,
+      details: error.response?.data,
       userId: req.userId
     });
 
     return res.status(500).json({
       success: false,
-      error: 'Failed to connect Google account'
+      error: error.response?.data?.error_description || error.response?.data?.error || 'Failed to connect Google account'
     });
   }
 };
 
-/**
- * List all integrations for user
- */
 const listIntegrations = async (req, res) => {
   try {
     const connections = await BusinessConnection.find({
@@ -160,24 +205,35 @@ const listIntegrations = async (req, res) => {
       isActive: true
     });
 
-    const populatedIntegrations = await Promise.all(AVAILABLE_PLATFORMS.map(async (plat) => {
-      const conn = connections.find(c => c.platform === plat.platform);
-      
-      let reviewCount = 0;
-      let lastSyncAt = null;
+    const populatedIntegrations = await Promise.all(AVAILABLE_PLATFORMS.map(async (platform) => {
+      const platformConnections = connections.filter((connection) => connection.platform === platform.platform);
+      const connectionIds = platformConnections.map((connection) => connection._id);
 
-      if (conn) {
-        reviewCount = await Review.countDocuments({ connectionId: conn._id });
-        lastSyncAt = conn.updatedAt;
-      }
+      const reviewCount = connectionIds.length
+        ? await Review.countDocuments({ connectionId: { $in: connectionIds } })
+        : 0;
+
+      const lastSyncAt = platformConnections.length
+        ? platformConnections
+            .map((connection) => connection.updatedAt)
+            .sort((a, b) => new Date(b) - new Date(a))[0]
+        : null;
 
       return {
-        ...plat,
-        id: plat.platform, // ID must match the platform name for frontend toggling
-        connected: !!conn,
+        ...platform,
+        id: platform.platform,
+        connected: platformConnections.length > 0,
         reviewCount,
         lastSyncAt,
-        status: conn ? 'active' : 'idle'
+        status: platformConnections.length ? 'active' : 'idle',
+        connectionCount: platformConnections.length,
+        locations: platformConnections.map((connection) => ({
+          id: connection._id,
+          locationId: connection.locationId,
+          locationName: connection.locationName,
+          aiConfigurationId: connection.aiConfigurationId || null,
+          lastSyncAt: connection.updatedAt
+        }))
       };
     }));
 
@@ -198,19 +254,15 @@ const listIntegrations = async (req, res) => {
   }
 };
 
-/**
- * Toggle an integration connection
- */
 const toggleIntegration = async (req, res) => {
   try {
-    const { id } = req.params; // Using the platform name as the ID
-    const { connect, businessEmail } = req.body;
+    const { id } = req.params;
+    const { connect, businessEmail, aiConfigurationId } = req.body;
     const userId = req.userId;
     const user = req.user;
 
     let connection = await BusinessConnection.findOne({ userId, platform: id });
 
-    // Disconnect Flow
     if (!connect) {
       if (connection) {
         connection.isActive = false;
@@ -219,25 +271,23 @@ const toggleIntegration = async (req, res) => {
       return res.status(200).json({ success: true, message: 'Disconnected successfully' });
     }
 
-    // Check platform limit before connecting
     const planConfig = user.getPlanConfig();
     if (planConfig.platformLimit !== Infinity) {
-      const activeCount = await BusinessConnection.countDocuments({ userId, isActive: true });
-      // Only check if this would be a NEW active connection
+      const activePlatforms = await BusinessConnection.distinct('platform', { userId, isActive: true });
       const wouldBeNew = !connection || !connection.isActive;
-      if (wouldBeNew && activeCount >= planConfig.platformLimit) {
+      const isNewPlatform = wouldBeNew && !activePlatforms.includes(id);
+      if (isNewPlatform && activePlatforms.length >= planConfig.platformLimit) {
         return res.status(403).json({
           success: false,
           error: `Your ${planConfig.name} plan supports up to ${planConfig.platformLimit} platform(s). Upgrade to connect more.`,
           code: 'PLATFORM_LIMIT_REACHED',
-          connected: activeCount,
+          connected: activePlatforms.length,
           limit: planConfig.platformLimit,
           upgradeUrl: '/dashboard/upgrade'
         });
       }
     }
 
-    // Connect Flow
     if (connection && connection.isActive) {
       return res.status(200).json({ success: true, connection });
     }
@@ -247,11 +297,21 @@ const toggleIntegration = async (req, res) => {
       if (businessEmail) {
         connection.config = { ...connection.config, businessEmail };
       }
+      if (aiConfigurationId !== undefined) {
+        connection.aiConfigurationId = aiConfigurationId || null;
+      }
       await connection.save();
       return res.status(200).json({ success: true, connection });
     }
 
-    // New Connection: Attempt auto-discovery
+    if (id === 'google') {
+      return res.status(400).json({
+        success: false,
+        error: 'Google Business Profile must be connected with Google OAuth.',
+        code: 'GOOGLE_OAUTH_REQUIRED'
+      });
+    }
+
     const searchTerm = user.businessName || user.name || 'Business';
     const searchLocation = user.city || user.country || '';
 
@@ -266,13 +326,13 @@ const toggleIntegration = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Could not automatically locate your business on this platform' });
     }
 
-    // Auto-connect
     connection = new BusinessConnection({
       userId,
       platform: id,
       locationId: businessMatch.locationId,
       locationName: businessMatch.locationName,
       isActive: true,
+      aiConfigurationId: aiConfigurationId || null,
       config: businessEmail ? { businessEmail } : {}
     });
     
@@ -282,44 +342,46 @@ const toggleIntegration = async (req, res) => {
       success: true,
       message: `${businessMatch.locationName} connected successfully!`
     });
-
   } catch (error) {
     logger.error('Toggle integration error', { error: error.message, userId: req.userId });
     return res.status(500).json({ success: false, error: 'Failed to toggle integration' });
   }
 };
 
-/**
- * Manually force a sync job immediately
- */
 const syncIntegration = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.userId;
 
-    const connection = await BusinessConnection.findOne({ userId, platform: id, isActive: true });
-    
-    if (!connection) {
+    const connections = await BusinessConnection.find({ userId, platform: id, isActive: true });
+    if (!connections.length) {
       return res.status(404).json({ success: false, error: 'Connection not active' });
     }
 
     const adapter = platformManager.getAdapter(id);
-    const rawReviews = await adapter.fetchReviews(connection);
-    
     let newCount = 0;
-    
-    // Save to Database
-    for (const raw of rawReviews) {
-      const normalized = adapter.transformReview(raw);
-      if (!normalized.platformReviewId) continue;
-      
-      const exists = await Review.findOne({ platform: id, platformReviewId: normalized.platformReviewId });
-      if (!exists) {
-        const nr = new Review({
-          reviewId: `${id}_${normalized.platformReviewId}`,
+    let totalReviews = 0;
+
+    for (const connection of connections) {
+      const rawReviews = await adapter.fetchReviews(connection);
+
+      for (const raw of rawReviews) {
+        const normalized = adapter.transformReview(raw);
+        if (!normalized.platformReviewId) continue;
+
+        const exists = await Review.findOne({
           platform: id,
           platformReviewId: normalized.platformReviewId,
-          platformLocationId: normalized.platformLocationId,
+          connectionId: connection._id
+        });
+
+        if (exists) continue;
+
+        const review = new Review({
+          reviewId: `${id}_${connection.locationId}_${normalized.platformReviewId}`,
+          platform: id,
+          platformReviewId: normalized.platformReviewId,
+          platformLocationId: connection.locationId,
           externalReviewId: normalized.platformReviewId,
           userId,
           connectionId: connection._id,
@@ -328,33 +390,43 @@ const syncIntegration = async (req, res) => {
           author: normalized.author,
           authorPhotoUrl: normalized.authorPhotoUrl,
           replyStatus: 'pending',
-          fetchedAt: new Date()
+          sentiment: inferSentiment(normalized.rating),
+          fetchedAt: new Date(),
+          createdAt: normalized.createdAt || new Date()
         });
-        await nr.save();
-        newCount++;
+
+        await review.save();
+
+        await queueReplyGeneration({
+          reviewId: review.reviewId,
+          userId: userId.toString(),
+          platform: review.platform,
+          entityType: review.entityType,
+          reviewText: review.reviewText,
+          rating: review.rating,
+          action: 'generateReply'
+        });
+
+        newCount += 1;
       }
+
+      connection.updatedAt = new Date();
+      await connection.save();
+      totalReviews += await Review.countDocuments({ connectionId: connection._id });
     }
-
-    connection.updatedAt = new Date();
-    await connection.save();
-
-    const reviewCount = await Review.countDocuments({ connectionId: connection._id });
 
     return res.status(200).json({
       success: true,
-      reviewCount,
-      lastSyncAt: connection.updatedAt
+      reviewCount: totalReviews,
+      newReviews: newCount,
+      lastSyncAt: new Date().toISOString()
     });
-
   } catch (error) {
     logger.error('Sync error', { error: error.message, userId: req.userId });
     return res.status(500).json({ success: false, error: 'Failed to sync platform' });
   }
 };
 
-/**
- * Get single integration
- */
 const getIntegration = async (req, res) => {
   try {
     const { id } = req.params;
@@ -382,7 +454,6 @@ const getIntegration = async (req, res) => {
         status: connection.isActive ? 'active' : 'expired'
       }
     });
-
   } catch (error) {
     logger.error('Get integration error', {
       error: error.message,
@@ -396,39 +467,49 @@ const getIntegration = async (req, res) => {
   }
 };
 
-/**
- * Disconnect integration
- */
 const disconnectIntegration = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const connection = await BusinessConnection.findOne({
-      _id: id,
-      userId: req.userId
-    });
+    const byId = mongoose.Types.ObjectId.isValid(id)
+      ? await BusinessConnection.findOne({
+          _id: id,
+          userId: req.userId
+        })
+      : null;
 
-    if (!connection) {
-      return res.status(404).json({
-        success: false,
-        error: 'Integration not found'
+    if (byId) {
+      byId.isActive = false;
+      await byId.save();
+    } else {
+      const platformConnections = await BusinessConnection.find({
+        userId: req.userId,
+        platform: id,
+        isActive: true
       });
-    }
 
-    // Soft delete - just mark as inactive
-    connection.isActive = false;
-    await connection.save();
+      if (!platformConnections.length) {
+        return res.status(404).json({
+          success: false,
+          error: 'Integration not found'
+        });
+      }
+
+      await BusinessConnection.updateMany(
+        { userId: req.userId, platform: id, isActive: true },
+        { isActive: false }
+      );
+    }
 
     logger.logReview('Integration disconnected', {
       userId: req.userId,
-      connectionId: id
+      integrationId: id
     });
 
     return res.status(200).json({
       success: true,
       message: 'Integration disconnected successfully'
     });
-
   } catch (error) {
     logger.error('Disconnect error', {
       error: error.message,
@@ -442,9 +523,6 @@ const disconnectIntegration = async (req, res) => {
   }
 };
 
-/**
- * Refresh Google token
- */
 const refreshGoogleToken = async (connection) => {
   try {
     const response = await axios.post('https://oauth2.googleapis.com/token', {
@@ -467,21 +545,15 @@ const refreshGoogleToken = async (connection) => {
       connectionId: connection._id
     });
 
-    // Mark as expired if refresh fails
     connection.isActive = false;
     await connection.save();
-
     throw error;
   }
 };
 
-/**
- * Get valid access token for a connection
- */
 const getValidAccessToken = async (connection) => {
-  // Check if token is expired
   if (connection.tokenExpiry && new Date() >= connection.tokenExpiry) {
-    return await refreshGoogleToken(connection);
+    return refreshGoogleToken(connection);
   }
   return connection.accessToken;
 };
