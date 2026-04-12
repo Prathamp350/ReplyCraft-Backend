@@ -23,6 +23,8 @@ router.delete('/promocodes/:id', authorizeRoles('superadmin', 'admin'), adminCon
 router.get('/plans', authorizeRoles('superadmin', 'admin'), adminController.getPlans);
 router.put('/plans/:planId', authorizeRoles('superadmin', 'admin'), adminController.updatePlan);
 
+router.get('/analytics/overview', authorizeRoles('superadmin', 'admin'), adminController.getAnalyticsOverview);
+router.get('/analytics/god-mode', authorizeRoles('superadmin', 'admin'), adminController.getGodModeAnalytics);
 router.get('/users', authorizeRoles('superadmin', 'admin', 'support'), adminController.getUsers);
 router.patch('/users/:id/plan', authorizeRoles('superadmin', 'admin'), adminController.updateUserPlan);
 router.delete('/users/:id', authorizeRoles('superadmin', 'admin'), adminController.deleteUser);
