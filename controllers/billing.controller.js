@@ -11,6 +11,7 @@ const BusinessConnection = require('../models/BusinessConnection');
 const PromoCode = require('../models/PromoCode');
 const CheckoutQuote = require('../models/CheckoutQuote');
 const Invoice = require('../models/Invoice');
+const RazorpayWebhookEvent = require('../models/RazorpayWebhookEvent');
 
 const baseConfig = require('../config/config');
 const { getConfig } = require('../services/configManager');
@@ -73,6 +74,130 @@ const buildInvoiceDownloadUrl = (req, invoiceId) =>
 
 const createInvoiceNumber = () =>
   `RC-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+
+const getPlanIntervalEnd = (billing = 'monthly') =>
+  new Date(Date.now() + (billing === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000);
+
+async function activatePaidPlan({
+  user,
+  planType,
+  billing,
+  orderId,
+  paymentId,
+  quote = null,
+  orderAmountPaise,
+  currency = 'INR',
+  customerPhone = null,
+}) {
+  const existingInvoice = await Invoice.findOne({ paymentId });
+  const plan = getConfig().plans[planType];
+
+  if (!plan) {
+    const error = new Error('Invalid plan for activation');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (existingInvoice) {
+    return {
+      alreadyProcessed: true,
+      invoice: existingInvoice,
+      plan,
+      subscriptionEnd: user.subscriptionCurrentPeriodEnd,
+    };
+  }
+
+  const subscriptionEnd = getPlanIntervalEnd(billing);
+
+  user.plan = planType;
+  user.razorpayOrderId = orderId;
+  user.razorpayPaymentId = paymentId;
+  user.razorpaySubscriptionStatus = 'active';
+  user.subscriptionStatus = 'active';
+  user.subscriptionCurrentPeriodEnd = subscriptionEnd;
+  user.planExpiresAt = subscriptionEnd;
+
+  if (quote?.promoCode) {
+    const promo = await PromoCode.findOne({ code: quote.promoCode.trim().toUpperCase() });
+    if (promo) {
+      promo.currentUses += 1;
+      await promo.save();
+      user.appliedPromoCode = promo.code;
+    }
+  } else {
+    user.appliedPromoCode = null;
+  }
+
+  await user.save();
+
+  const invoice = await Invoice.create({
+    userId: user._id,
+    invoiceNumber: createInvoiceNumber(),
+    orderId,
+    paymentId,
+    planId: planType,
+    planName: plan.name,
+    billing,
+    status: 'paid',
+    currency,
+    baseAmountPaise: quote?.basePricePaise || orderAmountPaise,
+    discountAmountPaise: Math.max(0, (quote?.basePricePaise || orderAmountPaise) - (quote?.finalPricePaise || orderAmountPaise)),
+    totalAmountPaise: quote?.finalPricePaise || orderAmountPaise,
+    promoCode: quote?.promoCode || null,
+    customerName: user.name,
+    customerEmail: user.email,
+    customerPhone: customerPhone || user.phoneNumber || null,
+    paidAt: new Date(),
+  });
+
+  if (quote && quote.status !== 'used') {
+    quote.status = 'used';
+    quote.razorpayOrderId = orderId;
+    await quote.save();
+  }
+
+  queuePlanUpgradeEmail({
+    to: user.email,
+    name: user.name,
+    planName: plan.name,
+    invoiceNumber: invoice.invoiceNumber,
+    orderId,
+    paymentId,
+    billingLabel: billing === 'yearly' ? 'Yearly billing' : 'Monthly billing',
+    amountPaid: formatInvoiceAmount(invoice.totalAmountPaise, invoice.currency),
+    monthlyLimit: `${plan.monthlyLimit.toLocaleString()} replies / month`,
+    storage: `${plan.storageMB} MB included`,
+    planEndsAt: formatPlanEndDate(subscriptionEnd),
+  }).catch((queueError) => {
+    logger.error('Failed to queue plan upgrade email', {
+      error: queueError.message,
+      userId: user._id,
+      invoiceNumber: invoice.invoiceNumber
+    });
+  });
+
+  queueSubscriptionActivatedEmail({
+    to: user.email,
+    name: user.name,
+    planName: plan.name,
+    billingLabel: billing === 'yearly' ? 'Yearly billing' : 'Monthly billing',
+    amountPaid: formatInvoiceAmount(invoice.totalAmountPaise, invoice.currency),
+    invoiceNumber: invoice.invoiceNumber,
+    planEndsAt: formatPlanEndDate(subscriptionEnd),
+  }).catch((queueError) => {
+    logger.error('Failed to queue subscription activated email', {
+      error: queueError.message,
+      userId: user._id,
+    });
+  });
+
+  return {
+    alreadyProcessed: false,
+    invoice,
+    plan,
+    subscriptionEnd,
+  };
+}
 
 const buildInvoiceHtml = (invoice) => {
   const paidDate = new Date(invoice.paidAt || invoice.createdAt);
@@ -501,59 +626,17 @@ const verifyPayment = async (req, res) => {
       });
     }
 
-    // Payment verified - update user plan
-    const plan = getConfig().plans[resolvedPlanType];
-    const subscriptionEnd = new Date(
-      Date.now() + (resolvedBilling === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000
-    );
-    
-    user.plan = resolvedPlanType;
-    user.razorpayOrderId = razorpay_order_id;
-    user.razorpayPaymentId = razorpay_payment_id;
-    user.razorpaySubscriptionStatus = 'active';
-    user.subscriptionStatus = 'active';
-    user.subscriptionCurrentPeriodEnd = subscriptionEnd;
-    user.planExpiresAt = user.subscriptionCurrentPeriodEnd;
-    
-    // Increment promo usage if appended
-    if (resolvedPromoCode) {
-      const promo = await PromoCode.findOne({ code: resolvedPromoCode.trim().toUpperCase() });
-      if (promo) {
-        promo.currentUses += 1;
-        await promo.save();
-        user.appliedPromoCode = promo.code;
-      }
-    } else {
-      user.appliedPromoCode = null;
-    }
-    
-    await user.save();
-
-    const invoice = await Invoice.create({
-      userId: user._id,
-      invoiceNumber: createInvoiceNumber(),
+    const { invoice, plan, subscriptionEnd } = await activatePaidPlan({
+      user,
+      planType: resolvedPlanType,
+      billing: resolvedBilling,
       orderId: razorpay_order_id,
       paymentId: razorpay_payment_id,
-      planId: resolvedPlanType,
-      planName: plan.name,
-      billing: resolvedBilling,
-      status: 'paid',
+      quote,
+      orderAmountPaise: order.amount,
       currency: order.currency || 'INR',
-      baseAmountPaise: quote?.basePricePaise || order.amount,
-      discountAmountPaise: Math.max(0, (quote?.basePricePaise || order.amount) - expectedAmountPaise),
-      totalAmountPaise: expectedAmountPaise,
-      promoCode: resolvedPromoCode,
-      customerName: user.name,
-      customerEmail: user.email,
       customerPhone: user.phoneNumber || null,
-      paidAt: new Date(),
     });
-
-    if (quote) {
-      quote.status = 'used';
-      quote.razorpayOrderId = razorpay_order_id;
-      await quote.save();
-    }
 
     logger.logBilling('Payment verified, plan activated', {
       userId: user._id,
@@ -563,52 +646,17 @@ const verifyPayment = async (req, res) => {
       invoiceNumber: invoice.invoiceNumber
     });
 
-    queuePlanUpgradeEmail({
-      to: user.email,
-      name: user.name,
-      planName: plan.name,
-      invoiceNumber: invoice.invoiceNumber,
-      orderId: razorpay_order_id,
-      paymentId: razorpay_payment_id,
-      billingLabel: resolvedBilling === 'yearly' ? 'Yearly billing' : 'Monthly billing',
-      amountPaid: formatInvoiceAmount(invoice.totalAmountPaise, invoice.currency),
-      monthlyLimit: `${plan.monthlyLimit.toLocaleString()} replies / month`,
-      storage: `${plan.storageMB} MB included`,
-      planEndsAt: formatPlanEndDate(user.subscriptionCurrentPeriodEnd),
-    }).catch((queueError) => {
-      logger.error('Failed to queue plan upgrade email', {
-        error: queueError.message,
-        userId: user._id,
-        invoiceNumber: invoice.invoiceNumber
-      });
-    });
-
-    queueSubscriptionActivatedEmail({
-      to: user.email,
-      name: user.name,
-      planName: plan.name,
-      billingLabel: resolvedBilling === 'yearly' ? 'Yearly billing' : 'Monthly billing',
-      amountPaid: formatInvoiceAmount(invoice.totalAmountPaise, invoice.currency),
-      invoiceNumber: invoice.invoiceNumber,
-      planEndsAt: formatPlanEndDate(user.subscriptionCurrentPeriodEnd),
-    }).catch((queueError) => {
-      logger.error('Failed to queue subscription activated email', {
-        error: queueError.message,
-        userId: user._id,
-      });
-    });
-
     return res.status(200).json({
       success: true,
       message: 'Payment successful! Plan activated.',
       plan: {
-        id: planType,
+        id: resolvedPlanType,
         name: plan.name,
         monthlyLimit: plan.monthlyLimit
       },
       subscription: {
         status: 'active',
-        currentPeriodEnd: user.subscriptionCurrentPeriodEnd
+        currentPeriodEnd: subscriptionEnd
       }
     });
 
@@ -766,19 +814,83 @@ const handleWebhook = async (req, res) => {
       ? JSON.parse(req.body.toString('utf8'))
       : req.body;
     const { event: eventType } = event;
+    const eventId = req.headers['x-razorpay-event-id'];
 
     logger.info('Razorpay webhook received', { eventType });
 
+    if (eventId) {
+      const duplicate = await RazorpayWebhookEvent.findOne({ eventId });
+      if (duplicate) {
+        return res.status(200).json({ received: true, duplicate: true });
+      }
+    }
+
     switch (eventType) {
-      case 'payment.captured':
+      case 'payment.captured': {
+        const paymentEntity = event.payload?.payment?.entity;
+        const orderId = paymentEntity?.order_id;
+        const paymentId = paymentEntity?.id;
+
+        if (orderId && paymentId) {
+          const razorpay = getRazorpayClient();
+          const [order, payment] = await Promise.all([
+            razorpay.orders.fetch(orderId),
+            razorpay.payments.fetch(paymentId)
+          ]);
+
+          const userId = order?.notes?.userId;
+          const planType = order?.notes?.plan;
+          const billing = order?.notes?.billing || 'monthly';
+          const quoteId = order?.notes?.quoteId;
+
+          if (userId && planType) {
+            const user = await User.findById(userId);
+            if (user) {
+              const quote = quoteId ? await CheckoutQuote.findOne({ _id: quoteId, userId }) : null;
+              await activatePaidPlan({
+                user,
+                planType,
+                billing,
+                orderId,
+                paymentId,
+                quote,
+                orderAmountPaise: order.amount,
+                currency: order.currency || 'INR',
+                customerPhone: payment.contact || null,
+              });
+            }
+          }
+        }
         break;
-        
-      case 'payment.failed':
+      }
+
+      case 'payment.failed': {
+        const paymentEntity = event.payload?.payment?.entity;
+        const orderId = paymentEntity?.order_id;
+        const userIdFromNotes = paymentEntity?.notes?.userId;
+
+        if (userIdFromNotes) {
+          await User.updateOne(
+            { _id: userIdFromNotes },
+            { subscriptionStatus: 'past_due', razorpaySubscriptionStatus: 'past_due' }
+          );
+        } else if (orderId) {
+          const razorpay = getRazorpayClient();
+          const order = await razorpay.orders.fetch(orderId);
+          if (order?.notes?.userId) {
+            await User.updateOne(
+              { _id: order.notes.userId },
+              { subscriptionStatus: 'past_due', razorpaySubscriptionStatus: 'past_due' }
+            );
+          }
+        }
+
         logger.warn('Payment failed', { 
-          paymentId: event.payment?.entity?.id 
+          paymentId: paymentEntity?.id 
         });
         break;
-        
+      }
+
       case 'subscription.activated':
         logger.info('Subscription activated', {
           subscriptionId: event.subscription?.entity?.id
@@ -802,6 +914,15 @@ const handleWebhook = async (req, res) => {
         
       default:
         logger.info('Unhandled Razorpay event', { eventType });
+    }
+
+    if (eventId) {
+      await RazorpayWebhookEvent.create({
+        eventId,
+        eventType,
+        paymentId: event.payload?.payment?.entity?.id || null,
+        orderId: event.payload?.payment?.entity?.order_id || null,
+      });
     }
 
     return res.status(200).json({ received: true });
@@ -851,7 +972,7 @@ module.exports = {
         billing,
         basePrice: Math.round(basePricePaise / 100),
         currency: 'INR',
-        currencySymbol: '₹',
+        currencySymbol: 'Rs.',
         discount: Math.round((basePricePaise - finalPricePaise) / 100),
         discountLabel: discountPercent > 0 ? `${discountPercent}% off` : '',
         tax: 0,
@@ -973,7 +1094,7 @@ module.exports = {
       const currentPlan = {
         id: user.plan,
         name: userPlan.name,
-        price: userPlan.priceINR === 0 ? '₹0' : `₹${userPlan.priceINR}`,
+        price: userPlan.priceINR === 0 ? 'Rs. 0' : `Rs. ${userPlan.priceINR}`,
         period: '/mo',
         repliesPerDay: `${userPlan.monthlyLimit.toLocaleString()}/month`,
         features: userPlan.features,
@@ -988,7 +1109,7 @@ module.exports = {
         return {
           id: key,
           name: p.name,
-          price: p.priceINR === 0 ? '₹0' : `₹${p.priceINR}`,
+          price: p.priceINR === 0 ? 'Rs. 0' : `Rs. ${p.priceINR}`,
           period: '/mo',
           repliesPerDay: `${p.monthlyLimit.toLocaleString()}/month`,
           features: p.features,

@@ -83,6 +83,18 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  razorpayOrderId: {
+    type: String,
+    default: null
+  },
+  razorpayPaymentId: {
+    type: String,
+    default: null
+  },
+  razorpaySubscriptionStatus: {
+    type: String,
+    default: null
+  },
   appliedPromoCode: {
     type: String,
     default: null
