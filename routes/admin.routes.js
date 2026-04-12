@@ -26,6 +26,8 @@ router.put('/plans/:planId', authorizeRoles('superadmin', 'admin'), adminControl
 router.get('/analytics/overview', authorizeRoles('superadmin', 'admin'), adminController.getAnalyticsOverview);
 router.get('/analytics/god-mode', authorizeRoles('superadmin', 'admin'), adminController.getGodModeAnalytics);
 router.get('/users', authorizeRoles('superadmin', 'admin', 'support'), adminController.getUsers);
+router.get('/marketing/audience', authorizeRoles('superadmin', 'admin'), adminController.getMarketingAudience);
+router.post('/marketing/send', authorizeRoles('superadmin', 'admin'), adminController.sendMarketingBroadcast);
 router.patch('/users/:id/plan', authorizeRoles('superadmin', 'admin'), adminController.updateUserPlan);
 router.delete('/users/:id', authorizeRoles('superadmin', 'admin'), adminController.deleteUser);
 router.get('/stats/live', authorizeRoles('superadmin', 'admin'), adminController.getStats);

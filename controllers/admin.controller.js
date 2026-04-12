@@ -9,6 +9,7 @@ const { getConfig, refreshConfig } = require('../services/configManager');
 const baseConfig = require('../config/config');
 const SystemConfig = require('../models/SystemConfig');
 const PromoCode = require('../models/PromoCode');
+const { queueMarketingBroadcastEmail } = require('../queues/email.queue');
 
 const churnStatuses = ['canceled', 'expired', 'past_due', 'unpaid'];
 
@@ -19,6 +20,7 @@ const buildUserFilter = (query = {}) => {
     subscriptionStatus,
     country,
     state,
+    paid,
     churned,
     isActive,
     dateFrom,
@@ -38,6 +40,7 @@ const buildUserFilter = (query = {}) => {
   }
 
   if (plan && plan !== 'all') filter.plan = plan;
+  if (typeof paid === 'string' && paid === 'true' && !filter.plan) filter.plan = { $ne: 'free' };
   if (subscriptionStatus && subscriptionStatus !== 'all') filter.subscriptionStatus = subscriptionStatus;
   if (country && country !== 'all') filter.country = country;
   if (state && state !== 'all') filter.state = state;
@@ -129,6 +132,22 @@ const buildSearchMatch = (search, fields) => {
       [field]: { $regex: escaped, $options: 'i' },
     })),
   };
+};
+
+const escapeHtml = (value = '') =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const toMarketingHtml = (message = '') => {
+  const safe = escapeHtml(message);
+  return safe
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p style="margin:0 0 18px;">${paragraph.replace(/\n/g, '<br />')}</p>`)
+    .join('');
 };
 
 /**
@@ -373,6 +392,114 @@ module.exports = {
       });
     } catch (error) {
       return res.status(500).json({ success: false, error: 'Failed to fetch users' });
+    }
+  },
+
+  getMarketingAudience: async (req, res) => {
+    try {
+      const filter = buildUserFilter(req.query);
+      const [totalRecipients, countries, states] = await Promise.all([
+        User.countDocuments(filter),
+        User.distinct('country', { role: 'user', country: { $nin: [null, ''] } }),
+        User.distinct('state', { role: 'user', state: { $nin: [null, ''] } }),
+      ]);
+
+      return res.status(200).json({
+        success: true,
+        audience: {
+          totalRecipients,
+          filters: {
+            countries: countries.filter(Boolean).sort(),
+            states: states.filter(Boolean).sort(),
+            plans: Object.keys(getConfig().plans),
+            subscriptionStatuses: ['active', 'trialing', 'past_due', 'canceled', 'unpaid', 'expired'],
+          },
+        },
+      });
+    } catch (error) {
+      logger.error('Failed to fetch marketing audience', { error: error.message });
+      return res.status(500).json({ success: false, error: 'Failed to load marketing audience' });
+    }
+  },
+
+  sendMarketingBroadcast: async (req, res) => {
+    try {
+      const {
+        subject,
+        message,
+        preheader,
+        search,
+        plan,
+        subscriptionStatus,
+        country,
+        state,
+        paid,
+        churned,
+        isActive,
+        dateFrom,
+        dateTo,
+      } = req.body || {};
+
+      if (!subject || !String(subject).trim()) {
+        return res.status(400).json({ success: false, error: 'Email subject is required' });
+      }
+
+      if (!message || !String(message).trim()) {
+        return res.status(400).json({ success: false, error: 'Email message is required' });
+      }
+
+      const filter = buildUserFilter({
+        search,
+        plan,
+        subscriptionStatus,
+        country,
+        state,
+        paid,
+        churned,
+        isActive,
+        dateFrom,
+        dateTo,
+      });
+
+      const recipients = await User.find(filter)
+        .select('name email plan subscriptionStatus country state')
+        .lean();
+
+      if (!recipients.length) {
+        return res.status(404).json({ success: false, error: 'No matching users found for this audience.' });
+      }
+
+      const messageHtml = toMarketingHtml(String(message).trim());
+      const trimmedSubject = String(subject).trim();
+      const trimmedPreheader = String(preheader || '').trim();
+
+      await Promise.all(
+        recipients.map((recipient) =>
+          queueMarketingBroadcastEmail({
+            to: recipient.email,
+            name: recipient.name || 'there',
+            subject: trimmedSubject,
+            preheader: trimmedPreheader || trimmedSubject,
+            messageHtml,
+            audienceLabel: recipient.plan || 'free',
+          })
+        )
+      );
+
+      logger.info('Marketing broadcast queued', {
+        queuedBy: req.user?.email,
+        recipientCount: recipients.length,
+        subject: trimmedSubject,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: `Broadcast queued for ${recipients.length} user${recipients.length === 1 ? '' : 's'}.`,
+        queuedRecipients: recipients.length,
+      });
+    } catch (error) {
+      logger.error('Failed to queue marketing broadcast', { error: error.message, stack: error.stack });
+      return res.status(500).json({ success: false, error: 'Failed to queue marketing email' });
     }
   },
 

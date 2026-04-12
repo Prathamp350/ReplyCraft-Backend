@@ -83,6 +83,7 @@ function getTransporterForType(type) {
     case 'welcome':
     case 'limitReached':
     case 'integrationConnected':
+    case 'marketingBroadcast':
     case 'test':
     default:
       return {
@@ -204,6 +205,18 @@ async function processEmailJob(job) {
     default:
       subject = 'ReplyCraft Notification';
       templateName = 'welcomeEmail';
+  }
+
+  if (type === 'marketingBroadcast') {
+    subject = data.subject || 'ReplyCraft Update';
+    templateName = 'marketingBroadcast';
+    templateData = {
+      ...templateData,
+      subject: data.subject || 'ReplyCraft Update',
+      preheader: data.preheader || 'A new update from ReplyCraft.',
+      supportEmail: process.env.SUPPORT_EMAIL || 'support@replycraft.co.in',
+      messageHtml: String(data.messageHtml || '').replace(/\n/g, '<br />'),
+    };
   }
   
   const html = loadTemplate(templateName, templateData);
