@@ -25,6 +25,20 @@ const systemConfigSchema = new mongoose.Schema({
     type: String,
     default: '\n\n— Powered by ReplyCraft'
   },
+  aiOps: {
+    globalEnabled: { type: Boolean, default: false },
+    marketingEnabled: { type: Boolean, default: true },
+    supportEnabled: { type: Boolean, default: true },
+    financeEnabled: { type: Boolean, default: true },
+    emergencyStop: { type: Boolean, default: false },
+    supportAutoEmail: { type: Boolean, default: false },
+    marketingAutoSend: { type: Boolean, default: false },
+    financeAutoSend: { type: Boolean, default: false },
+    blockDestructiveActions: { type: Boolean, default: true },
+    blockRoleChanges: { type: Boolean, default: true },
+    blockPlanChanges: { type: Boolean, default: true },
+    lastUpdatedAt: { type: Date, default: null }
+  },
   updatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -41,6 +55,22 @@ systemConfigSchema.pre('save', function(next) {
   }
   if (!this.extraStorage || !this.extraStorage.basePriceINR) {
     this.extraStorage = extStorage;
+  }
+  if (!this.aiOps) {
+    this.aiOps = {
+      globalEnabled: false,
+      marketingEnabled: true,
+      supportEnabled: true,
+      financeEnabled: true,
+      emergencyStop: false,
+      supportAutoEmail: false,
+      marketingAutoSend: false,
+      financeAutoSend: false,
+      blockDestructiveActions: true,
+      blockRoleChanges: true,
+      blockPlanChanges: true,
+      lastUpdatedAt: null
+    };
   }
   next();
 });

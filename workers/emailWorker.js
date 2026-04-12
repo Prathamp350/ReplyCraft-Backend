@@ -76,6 +76,7 @@ function getTransporterForType(type) {
     case 'ticketConfirmation':
     case 'support':
     case 'ticketReply':
+    case 'supportAiReply':
       return {
         transporter: supportTransporter,
         from: process.env.SUPPORT_EMAIL_FROM
@@ -215,6 +216,17 @@ async function processEmailJob(job) {
       subject: data.subject || 'ReplyCraft Update',
       preheader: data.preheader || 'A new update from ReplyCraft.',
       supportEmail: process.env.SUPPORT_EMAIL || 'support@replycraft.co.in',
+      messageHtml: String(data.messageHtml || '').replace(/\n/g, '<br />'),
+    };
+  }
+  
+  if (type === 'supportAiReply') {
+    subject = data.subject || 'ReplyCraft Support Update';
+    templateName = 'supportAiReply';
+    templateData = {
+      ...templateData,
+      subject,
+      ticketId: data.ticketId || '',
       messageHtml: String(data.messageHtml || '').replace(/\n/g, '<br />'),
     };
   }

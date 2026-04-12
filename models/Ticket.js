@@ -61,6 +61,26 @@ const ticketSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  awaitingCustomerConfirmation: {
+    type: Boolean,
+    default: false
+  },
+  customerSatisfied: {
+    type: Boolean,
+    default: false
+  },
+  lastCustomerContactAt: {
+    type: Date,
+    default: null
+  },
+  aiLastSuggestion: {
+    type: String,
+    default: null
+  },
+  aiLastSentAt: {
+    type: Date,
+    default: null
+  },
   notes: [ticketNoteSchema]
 }, {
   timestamps: true

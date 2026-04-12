@@ -69,6 +69,7 @@ function getPriorityForType(type) {
     subscriptionCanceled: 1,
     subscriptionReminder: 1,
     marketingBroadcast: 4,
+    supportAiReply: 2,
     passwordReset: 1,
     test: 1,
     otp: 1
@@ -215,6 +216,13 @@ async function queueMarketingBroadcastEmail(data) {
   });
 }
 
+async function queueSupportAiReplyEmail(data) {
+  return queueEmail('supportAiReply', {
+    type: 'supportAiReply',
+    ...data,
+  });
+}
+
 /**
  * Get email queue stats
  */
@@ -236,5 +244,6 @@ module.exports = {
   queueSubscriptionCanceledEmail,
   queueSubscriptionReminderEmail,
   queueMarketingBroadcastEmail,
+  queueSupportAiReplyEmail,
   getEmailQueueStats
 };

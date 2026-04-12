@@ -114,6 +114,13 @@ const updateTicketStatus = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Ticket not found' });
     }
 
+    if (status === 'closed' && !ticket.customerSatisfied) {
+      return res.status(400).json({
+        success: false,
+        error: 'This ticket cannot be closed until customer satisfaction is confirmed.'
+      });
+    }
+
     ticket.status = status;
     await ticket.save();
 

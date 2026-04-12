@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
+const aiOpsController = require('../controllers/aiOps.controller');
 const { authenticate, authorizeRoles } = require('../middleware/auth.middleware');
 
 // Apply authentication to all admin routes
@@ -28,6 +29,13 @@ router.get('/analytics/god-mode', authorizeRoles('superadmin', 'admin'), adminCo
 router.get('/users', authorizeRoles('superadmin', 'admin', 'support'), adminController.getUsers);
 router.get('/marketing/audience', authorizeRoles('superadmin', 'admin'), adminController.getMarketingAudience);
 router.post('/marketing/send', authorizeRoles('superadmin', 'admin'), adminController.sendMarketingBroadcast);
+router.get('/ai-ops/config', authorizeRoles('superadmin', 'admin'), aiOpsController.getConfig);
+router.put('/ai-ops/config', authorizeRoles('superadmin', 'admin'), aiOpsController.updateConfig);
+router.post('/ai-ops/marketing/draft', authorizeRoles('superadmin', 'admin'), aiOpsController.generateMarketingDraft);
+router.post('/ai-ops/finance/draft', authorizeRoles('superadmin', 'admin'), aiOpsController.generateFinanceDraft);
+router.post('/ai-ops/support/:ticketId/draft', authorizeRoles('superadmin', 'admin', 'support'), aiOpsController.generateSupportDraft);
+router.post('/ai-ops/support/:ticketId/send', authorizeRoles('superadmin', 'admin', 'support'), aiOpsController.sendSupportDraft);
+router.put('/ai-ops/support/:ticketId/satisfaction', authorizeRoles('superadmin', 'admin', 'support'), aiOpsController.markTicketSatisfaction);
 router.patch('/users/:id/plan', authorizeRoles('superadmin', 'admin'), adminController.updateUserPlan);
 router.delete('/users/:id', authorizeRoles('superadmin', 'admin'), adminController.deleteUser);
 router.get('/stats/live', authorizeRoles('superadmin', 'admin'), adminController.getStats);
