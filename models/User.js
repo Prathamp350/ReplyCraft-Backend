@@ -102,17 +102,53 @@ const userSchema = new mongoose.Schema({
   subscriptionStatus: {
     type: String,
     default: null,
-    enum: [null, 'active', 'trialing', 'past_due', 'canceled', 'unpaid']
+    enum: [null, 'active', 'trialing', 'past_due', 'canceled', 'unpaid', 'expired']
+  },
+  billingInterval: {
+    type: String,
+    enum: ['monthly', 'yearly'],
+    default: 'monthly'
+  },
+  subscriptionCurrentPeriodStart: {
+    type: Date,
+    default: null
   },
   subscriptionCurrentPeriodEnd: {
     type: Date,
     default: null
+  },
+  currentPlanPricePaise: {
+    type: Number,
+    default: 0
   },
   lastSubscriptionReminderSentAt: {
     type: Date,
     default: null
   },
   planExpiresAt: {
+    type: Date,
+    default: null
+  },
+  cancelAtPeriodEnd: {
+    type: Boolean,
+    default: false
+  },
+  scheduledPlan: {
+    type: String,
+    enum: [null, ...baseConfig.validPlans],
+    default: null
+  },
+  scheduledBillingInterval: {
+    type: String,
+    enum: [null, 'monthly', 'yearly'],
+    default: null
+  },
+  scheduledChangeReason: {
+    type: String,
+    enum: [null, 'downgrade', 'cancel', 'admin'],
+    default: null
+  },
+  lastPlanChangeAt: {
     type: Date,
     default: null
   },
@@ -296,23 +332,39 @@ userSchema.methods.getPlatformLimit = function() {
  */
 userSchema.methods.syncSubscriptionStatus = async function() {
   const now = new Date();
+  const config = getConfig();
+  const getCycleEnd = (billingInterval = 'monthly') =>
+    new Date(Date.now() + (billingInterval === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000);
   
   // Check if subscription has expired
   if (this.subscriptionCurrentPeriodEnd && this.subscriptionCurrentPeriodEnd < now) {
     if (this.plan !== 'free') {
       console.log(`[Subscription] Expiring subscription for user ${this._id}, downgrading to free`);
-      
+
       this.plan = 'free';
+      this.lastPlanChangeAt = now;
+      this.scheduledPlan = null;
+      this.scheduledBillingInterval = null;
+      this.cancelAtPeriodEnd = false;
+      this.scheduledChangeReason = null;
       this.subscriptionStatus = 'expired';
+      this.subscriptionCurrentPeriodStart = null;
+      this.subscriptionCurrentPeriodEnd = null;
+      this.planExpiresAt = null;
+      this.currentPlanPricePaise = 0;
+      this.billingInterval = 'monthly';
+      this.razorpayOrderId = null;
+      this.razorpayPaymentId = null;
+      this.razorpaySubscriptionStatus = 'expired';
       this.stripeSubscriptionId = null;
-      // Reset extra storage on downgrade
       this.extraStorageMB = 0;
+
       await this.save();
       
       return {
         downgraded: true,
         reason: 'subscription_expired',
-        newPlan: 'free'
+        newPlan: nextPlan
       };
     }
   }
@@ -324,6 +376,15 @@ userSchema.methods.syncSubscriptionStatus = async function() {
       
       this.plan = 'free';
       this.extraStorageMB = 0;
+      this.cancelAtPeriodEnd = false;
+      this.scheduledPlan = null;
+      this.scheduledBillingInterval = null;
+      this.scheduledChangeReason = null;
+      this.subscriptionCurrentPeriodStart = null;
+      this.subscriptionCurrentPeriodEnd = null;
+      this.planExpiresAt = null;
+      this.currentPlanPricePaise = 0;
+      this.billingInterval = 'monthly';
       await this.save();
       
       return {
@@ -353,11 +414,18 @@ userSchema.methods.getSubscriptionInfo = function() {
     currentPeriodEnd: this.subscriptionCurrentPeriodEnd 
       ? Math.floor(this.subscriptionCurrentPeriodEnd.getTime() / 1000) 
       : null,
+    currentPeriodStart: this.subscriptionCurrentPeriodStart
+      ? Math.floor(this.subscriptionCurrentPeriodStart.getTime() / 1000)
+      : null,
     monthlyLimit: planConfig.monthlyLimit,
     perMinute: planConfig.perMinute,
     platformLimit: planConfig.platformLimit === Infinity ? null : planConfig.platformLimit,
     storageMB: planConfig.storageMB,
     hasWatermark: planConfig.hasWatermark,
+    billingInterval: this.billingInterval || 'monthly',
+    cancelAtPeriodEnd: !!this.cancelAtPeriodEnd,
+    scheduledPlan: this.scheduledPlan || null,
+    scheduledBillingInterval: this.scheduledBillingInterval || null,
   };
 };
 

@@ -33,6 +33,26 @@ const checkoutQuoteSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    prorationCreditPaise: {
+      type: Number,
+      default: 0,
+    },
+    promoDiscountPaise: {
+      type: Number,
+      default: 0,
+    },
+    pricingMode: {
+      type: String,
+      default: 'new_subscription',
+    },
+    chargeType: {
+      type: String,
+      default: 'pay_full',
+    },
+    currentPlan: {
+      type: String,
+      default: null,
+    },
     promoCode: {
       type: String,
       default: null,

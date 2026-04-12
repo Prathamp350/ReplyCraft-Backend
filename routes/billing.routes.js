@@ -14,6 +14,7 @@ const {
   validatePromo,
   getSubscriptionStatus,
   cancelSubscription,
+  changePlan,
   handleWebhook,
   getInvoices,
   getUsage,
@@ -35,6 +36,7 @@ router.get('/invoices/:id/download', authenticate, downloadInvoice);
 router.post('/create-order', authenticate, createOrder);
 router.post('/promo/validate', authenticate, validatePromo);
 router.post('/verify-payment', authenticate, verifyPayment);
+router.post('/change-plan', authenticate, changePlan);
 router.post('/cancel', authenticate, cancelSubscription);
 
 module.exports = router;

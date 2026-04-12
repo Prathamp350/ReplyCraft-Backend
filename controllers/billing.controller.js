@@ -22,6 +22,9 @@ const {
   queueSubscriptionCanceledEmail
 } = require('../queues/email.queue');
 
+const PLAN_ORDER = { free: 0, starter: 1, pro: 2, business: 3 };
+const PLAN_ICONS = { free: 'zap', starter: 'rocket', pro: 'crown', business: 'sparkles' };
+
 const isPlaceholderValue = (value = '') =>
   !value || value.startsWith('your_') || value.includes('change_me');
 
@@ -107,15 +110,34 @@ async function activatePaidPlan({
     };
   }
 
-  const subscriptionEnd = getPlanIntervalEnd(billing);
+  const isInCycleUpgrade =
+    isPaidPlan(user.plan) &&
+    getPlanRank(planType) > getPlanRank(user.plan) &&
+    user.subscriptionCurrentPeriodEnd &&
+    new Date(user.subscriptionCurrentPeriodEnd) > new Date();
+
+  const subscriptionStart = isInCycleUpgrade
+    ? (user.subscriptionCurrentPeriodStart || new Date())
+    : new Date();
+  const subscriptionEnd = isInCycleUpgrade
+    ? user.subscriptionCurrentPeriodEnd
+    : getPlanIntervalEnd(billing);
 
   user.plan = planType;
   user.razorpayOrderId = orderId;
   user.razorpayPaymentId = paymentId;
   user.razorpaySubscriptionStatus = 'active';
   user.subscriptionStatus = 'active';
+  user.subscriptionCurrentPeriodStart = subscriptionStart;
   user.subscriptionCurrentPeriodEnd = subscriptionEnd;
   user.planExpiresAt = subscriptionEnd;
+  user.billingInterval = billing;
+  user.currentPlanPricePaise = getPlanBasePricePaise(planType, billing);
+  user.cancelAtPeriodEnd = false;
+  user.scheduledPlan = null;
+  user.scheduledBillingInterval = null;
+  user.scheduledChangeReason = null;
+  user.lastPlanChangeAt = new Date();
 
   if (quote?.promoCode) {
     const promo = await PromoCode.findOne({ code: quote.promoCode.trim().toUpperCase() });
@@ -281,17 +303,167 @@ function getBillingMultiplier(billing = 'monthly') {
   return billing === 'yearly' ? 12 * 0.8 : 1;
 }
 
-async function buildOrderPricing(planType, billing = 'monthly', promoCode = '') {
+function getBillingCycleDays(billing = 'monthly') {
+  return billing === 'yearly' ? 365 : 30;
+}
+
+function getPlanRank(planId) {
+  return PLAN_ORDER[planId] || 0;
+}
+
+function getPlanBasePricePaise(planId, billing = 'monthly') {
+  const plan = getConfig().plans[planId];
+  if (!plan) return 0;
+
+  return Math.max(0, Math.round((plan.priceINR || 0) * 100 * getBillingMultiplier(billing)));
+}
+
+function isPaidPlan(planId) {
+  return !!planId && planId !== 'free';
+}
+
+function getCurrentPlanBasePricePaise(user) {
+  if (!isPaidPlan(user.plan)) {
+    return 0;
+  }
+
+  return user.currentPlanPricePaise || getPlanBasePricePaise(user.plan, user.billingInterval || 'monthly');
+}
+
+function getRemainingTimeRatio(user) {
+  if (!user.subscriptionCurrentPeriodEnd) {
+    return 1;
+  }
+
+  const now = Date.now();
+  const periodEnd = new Date(user.subscriptionCurrentPeriodEnd).getTime();
+  if (periodEnd <= now) {
+    return 0;
+  }
+
+  const fallbackStart = periodEnd - getBillingCycleDays(user.billingInterval || 'monthly') * 24 * 60 * 60 * 1000;
+  const periodStart = user.subscriptionCurrentPeriodStart
+    ? new Date(user.subscriptionCurrentPeriodStart).getTime()
+    : fallbackStart;
+
+  const total = Math.max(1, periodEnd - periodStart);
+  const remaining = Math.max(0, periodEnd - now);
+
+  return Math.max(0, Math.min(1, remaining / total));
+}
+
+function getRemainingUsageRatio(user) {
+  if (!isPaidPlan(user.plan)) {
+    return 1;
+  }
+
+  const currentPlan = getConfig().plans[user.plan] || getConfig().plans.free;
+  const limit = Number(currentPlan.monthlyLimit || 0);
+  if (limit <= 0) {
+    return 1;
+  }
+
+  const used = Math.max(0, Number(user.monthlyUsage?.count || 0));
+  return Math.max(0, Math.min(1, (limit - Math.min(used, limit)) / limit));
+}
+
+function buildPlanChangeDecision(user, targetPlan, targetBilling = 'monthly') {
+  const currentPlan = user.plan || 'free';
+  const currentBilling = user.billingInterval || 'monthly';
+  const currentRank = getPlanRank(currentPlan);
+  const targetRank = getPlanRank(targetPlan);
+  const currentBasePricePaise = getCurrentPlanBasePricePaise(user);
+  const targetBasePricePaise = getPlanBasePricePaise(targetPlan, targetBilling);
+  const timeRatio = getRemainingTimeRatio(user);
+  const usageRatio = getRemainingUsageRatio(user);
+  const fairUseRatio = Math.max(0, Math.min(timeRatio, usageRatio));
+
+  const result = {
+    currentPlan,
+    targetPlan,
+    currentBilling,
+    targetBilling,
+    currentRank,
+    targetRank,
+    timeRatio,
+    usageRatio,
+    fairUseRatio,
+    targetBasePricePaise,
+    currentBasePricePaise,
+    remainingTargetCostPaise: targetBasePricePaise,
+    prorationCreditPaise: 0,
+    promoDiscountPaise: 0,
+    totalDiscountPaise: 0,
+    payableNowPaise: targetBasePricePaise,
+    action: 'pay_full',
+    effectiveAt: null,
+    reason: 'new_subscription',
+  };
+
+  if (targetPlan === currentPlan && targetBilling === currentBilling) {
+    result.action = 'noop';
+    result.payableNowPaise = 0;
+    result.remainingTargetCostPaise = 0;
+    result.reason = 'already_on_plan';
+    return result;
+  }
+
+  if (!isPaidPlan(currentPlan) || !user.subscriptionCurrentPeriodEnd || user.subscriptionCurrentPeriodEnd <= new Date()) {
+    return result;
+  }
+
+  if (targetRank < currentRank || (targetRank === currentRank && targetBilling !== currentBilling)) {
+    result.action = 'schedule_change';
+    result.payableNowPaise = 0;
+    result.remainingTargetCostPaise = 0;
+    result.reason = targetPlan === 'free' ? 'cancel_at_period_end' : 'downgrade_at_period_end';
+    result.effectiveAt = user.subscriptionCurrentPeriodEnd;
+    return result;
+  }
+
+  if (targetRank === currentRank) {
+    result.action = 'noop';
+    result.payableNowPaise = 0;
+    result.remainingTargetCostPaise = 0;
+    result.reason = 'already_on_equivalent_plan';
+    return result;
+  }
+
+  result.action = 'upgrade_now';
+  result.reason = 'prorated_upgrade';
+  result.effectiveAt = new Date();
+  result.remainingTargetCostPaise = Math.round(targetBasePricePaise * fairUseRatio);
+  result.prorationCreditPaise = Math.round(currentBasePricePaise * fairUseRatio);
+  result.totalDiscountPaise = result.prorationCreditPaise;
+  result.payableNowPaise = Math.max(100, result.remainingTargetCostPaise - result.prorationCreditPaise);
+
+  return result;
+}
+
+async function buildOrderPricing(user, planType, billing = 'monthly', promoCode = '') {
   const rpPlan = getRazorpayPlan(planType);
   if (!rpPlan) {
     throw new Error('Invalid plan');
   }
 
-  const multiplier = getBillingMultiplier(billing);
-  const basePricePaise = Math.max(100, Math.round(rpPlan.price * multiplier));
-  let finalPricePaise = basePricePaise;
+  const decision = buildPlanChangeDecision(user, planType, billing);
+  if (decision.action === 'noop') {
+    const error = new Error('You are already on this plan.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (decision.action === 'schedule_change') {
+    const error = new Error('This plan change is applied from the billing page and takes effect at the end of the current billing cycle.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const basePricePaise = Math.max(0, decision.remainingTargetCostPaise);
+  let finalPricePaise = Math.max(0, decision.payableNowPaise);
   let appliedPromo = null;
   let discountPercent = 0;
+  let promoDiscountPaise = 0;
 
   if (promoCode) {
     const promo = await PromoCode.findOne({ code: promoCode.trim().toUpperCase() });
@@ -307,8 +479,8 @@ async function buildOrderPricing(planType, billing = 'monthly', promoCode = '') 
     }
 
     discountPercent = promo.discountPercent;
-    finalPricePaise = Math.round(finalPricePaise * ((100 - promo.discountPercent) / 100));
-    if (finalPricePaise < 100) finalPricePaise = 100;
+    promoDiscountPaise = Math.round(finalPricePaise * (promo.discountPercent / 100));
+    finalPricePaise = Math.max(100, finalPricePaise - promoDiscountPaise);
     appliedPromo = promo.code;
   }
 
@@ -319,11 +491,27 @@ async function buildOrderPricing(planType, billing = 'monthly', promoCode = '') 
     finalPricePaise,
     appliedPromo,
     discountPercent,
+    promoDiscountPaise,
+    prorationCreditPaise: decision.prorationCreditPaise,
+    chargeType: decision.action,
+    pricingMode: decision.reason,
+    currentPlanId: user.plan,
+    fairUseRatio: decision.fairUseRatio,
+    remainingTimeRatio: decision.timeRatio,
+    remainingUsageRatio: decision.usageRatio,
+    effectiveAt: decision.effectiveAt,
   };
 }
 
 async function createCheckoutQuote({ userId, planType, billing = 'monthly', promoCode = '' }) {
-  const pricing = await buildOrderPricing(planType, billing, promoCode);
+  const user = await User.findById(userId);
+  if (!user) {
+    const error = new Error('User not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const pricing = await buildOrderPricing(user, planType, billing, promoCode);
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
   const quote = await CheckoutQuote.create({
@@ -335,6 +523,11 @@ async function createCheckoutQuote({ userId, planType, billing = 'monthly', prom
     finalPricePaise: pricing.finalPricePaise,
     discountPercent: pricing.discountPercent,
     promoCode: pricing.appliedPromo,
+    prorationCreditPaise: pricing.prorationCreditPaise,
+    promoDiscountPaise: pricing.promoDiscountPaise,
+    pricingMode: pricing.pricingMode,
+    chargeType: pricing.chargeType,
+    currentPlan: pricing.currentPlanId,
     expiresAt,
   });
 
@@ -415,6 +608,21 @@ const createOrder = async (req, res) => {
       });
     }
 
+    const decision = buildPlanChangeDecision(user, planType, billing);
+    if (decision.action === 'noop') {
+      return res.status(400).json({
+        success: false,
+        error: 'You are already on this plan.'
+      });
+    }
+
+    if (decision.action === 'schedule_change') {
+      return res.status(400).json({
+        success: false,
+        error: 'This plan change is scheduled from the billing page and does not require immediate payment.'
+      });
+    }
+
     let rpPlan;
     let finalPricePaise;
     let appliedPromo;
@@ -435,7 +643,7 @@ const createOrder = async (req, res) => {
       resolvedBilling = quote.billing;
     } else {
       ({ rpPlan, finalPricePaise, appliedPromo, basePricePaise, discountPercent } =
-        await buildOrderPricing(planType, billing, promoCode));
+        await buildOrderPricing(user, planType, billing, promoCode));
     }
 
     // Create Razorpay order
@@ -702,7 +910,11 @@ const getSubscriptionStatus = async (req, res) => {
       platformLimit: plan.platformLimit === Infinity ? null : plan.platformLimit,
       storageMB: plan.storageMB,
       hasWatermark: plan.hasWatermark,
-      razorpayPaymentId: user.razorpayPaymentId || null
+      razorpayPaymentId: user.razorpayPaymentId || null,
+      billingInterval: user.billingInterval || 'monthly',
+      cancelAtPeriodEnd: !!user.cancelAtPeriodEnd,
+      scheduledPlan: user.scheduledPlan || null,
+      scheduledBillingInterval: user.scheduledBillingInterval || null
     });
 
   } catch (error) {
@@ -719,7 +931,7 @@ const getSubscriptionStatus = async (req, res) => {
 };
 
 /**
- * Cancel subscription (downgrade to free)
+ * Cancel subscription at period end
  */
 const cancelSubscription = async (req, res) => {
   try {
@@ -732,15 +944,12 @@ const cancelSubscription = async (req, res) => {
       });
     }
 
-    // Downgrade to free
-    user.plan = 'free';
-    user.razorpaySubscriptionStatus = 'canceled';
-    user.subscriptionStatus = 'canceled';
-    user.razorpayOrderId = null;
-    user.razorpayPaymentId = null;
-    user.subscriptionCurrentPeriodEnd = null;
-    user.planExpiresAt = null;
-    user.extraStorageMB = 0; // Reset extra storage
+    user.cancelAtPeriodEnd = true;
+    user.scheduledPlan = 'free';
+    user.scheduledBillingInterval = 'monthly';
+    user.scheduledChangeReason = 'cancel';
+    user.subscriptionStatus = 'active';
+    user.razorpaySubscriptionStatus = 'active';
     
     await user.save();
 
@@ -763,8 +972,10 @@ const cancelSubscription = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Subscription canceled. You are now on the Free plan.',
-      plan: 'free'
+      message: 'Subscription will end on the current billing period end date.',
+      plan: user.plan,
+      cancelAtPeriodEnd: true,
+      effectiveAt: user.subscriptionCurrentPeriodEnd
     });
 
   } catch (error) {
@@ -933,16 +1144,66 @@ const handleWebhook = async (req, res) => {
   }
 };
 
-// Plan order for sorting / comparison
-const PLAN_ORDER = { free: 0, starter: 1, pro: 2, business: 3 };
-const PLAN_ICONS = { free: 'zap', starter: 'rocket', pro: 'crown', business: 'sparkles' };
-
 module.exports = {
   getPlans,
   createOrder,
   verifyPayment,
   getSubscriptionStatus,
   cancelSubscription,
+  changePlan: async (req, res) => {
+    try {
+      const user = req.user;
+      const { planId, billing = 'monthly' } = req.body;
+
+      if (!planId || !getConfig().plans[planId]) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid plan. Choose from: ${baseConfig.validPlans.join(', ')}`
+        });
+      }
+
+      const decision = buildPlanChangeDecision(user, planId, billing);
+      if (decision.action === 'noop') {
+        return res.status(400).json({
+          success: false,
+          error: 'You are already on this plan.'
+        });
+      }
+
+      if (decision.action === 'upgrade_now' || (!isPaidPlan(user.plan) && isPaidPlan(planId))) {
+        return res.status(400).json({
+          success: false,
+          error: 'Upgrades require checkout so proration and payment can be verified safely.'
+        });
+      }
+
+      user.cancelAtPeriodEnd = planId === 'free';
+      user.scheduledPlan = planId;
+      user.scheduledBillingInterval = planId === 'free' ? 'monthly' : billing;
+      user.scheduledChangeReason = planId === 'free' ? 'cancel' : 'downgrade';
+      await user.save();
+
+      return res.status(200).json({
+        success: true,
+        message: planId === 'free'
+          ? 'Cancellation scheduled for the end of the current billing period.'
+          : `${(getConfig().plans[planId] || getConfig().plans.free).name} is queued as your next renewal choice while your current access stays active until period end.`,
+        effectiveAt: user.subscriptionCurrentPeriodEnd,
+        pendingChange: {
+          planId,
+          billing,
+          reason: user.scheduledChangeReason,
+          cancelAtPeriodEnd: user.cancelAtPeriodEnd,
+        }
+      });
+    } catch (error) {
+      logger.error('Failed to change plan', { error: error.message, userId: req.userId });
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to update billing plan'
+      });
+    }
+  },
   handleWebhook,
   getOrderSummary: async (req, res) => {
     try {
@@ -973,13 +1234,25 @@ module.exports = {
         basePrice: Math.round(basePricePaise / 100),
         currency: 'INR',
         currencySymbol: 'Rs.',
-        discount: Math.round((basePricePaise - finalPricePaise) / 100),
-        discountLabel: discountPercent > 0 ? `${discountPercent}% off` : '',
+        discount: Math.round((pricing.prorationCreditPaise + pricing.promoDiscountPaise) / 100),
+        discountLabel: [
+          pricing.prorationCreditPaise > 0 ? 'Unused time and quota credit' : '',
+          discountPercent > 0 ? `${discountPercent}% promo` : '',
+        ].filter(Boolean).join(' + '),
         tax: 0,
         taxLabel: '',
         total: Math.round(finalPricePaise / 100),
         period: billing === 'yearly' ? 'year' : 'month',
         features: getConfig().plans[planType].features,
+        chargeType: pricing.chargeType,
+        pricingMode: pricing.pricingMode,
+        prorationCredit: Math.round(pricing.prorationCreditPaise / 100),
+        promoDiscount: Math.round(pricing.promoDiscountPaise / 100),
+        fairUseRatio: Number(pricing.fairUseRatio || 1),
+        effectiveAt: pricing.effectiveAt,
+        billingPolicy: pricing.chargeType === 'upgrade_now'
+          ? 'Upgrade charge is prorated using remaining time and remaining quota from your current cycle.'
+          : 'This purchase starts a new billing cycle.',
       });
     } catch (error) {
       const statusCode = error.statusCode || 500;
@@ -1125,6 +1398,16 @@ module.exports = {
       const nextBillingDate = user.subscriptionCurrentPeriodEnd 
         ? new Date(user.subscriptionCurrentPeriodEnd).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
         : null;
+      const pendingChange = user.scheduledPlan
+        ? {
+            planId: user.scheduledPlan,
+            planName: (getConfig().plans[user.scheduledPlan] || getConfig().plans.free).name,
+            billingInterval: user.scheduledBillingInterval || 'monthly',
+            reason: user.scheduledChangeReason || (user.cancelAtPeriodEnd ? 'cancel' : 'downgrade'),
+            effectiveAt: user.subscriptionCurrentPeriodEnd,
+            cancelAtPeriodEnd: !!user.cancelAtPeriodEnd,
+          }
+        : null;
 
       const invoices = await Invoice.find({ userId: user._id })
         .sort({ paidAt: -1, createdAt: -1 })
@@ -1135,6 +1418,10 @@ module.exports = {
         currentPlan,
         allPlans,
         nextBillingDate,
+        billingInterval: user.billingInterval || 'monthly',
+        subscriptionStatus: user.subscriptionStatus || (user.plan === 'free' ? 'active' : 'inactive'),
+        cancelAtPeriodEnd: !!user.cancelAtPeriodEnd,
+        pendingChange,
         usage: {
           aiRepliesUsed: user.monthlyUsage?.count || 0,
           aiRepliesLimit: userPlan.monthlyLimit,
