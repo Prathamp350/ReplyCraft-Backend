@@ -73,6 +73,15 @@ const shouldCooldownGoogleError = (error) => {
   );
 };
 
+const isBlockedGoogleModel = (model) =>
+  String(model || '')
+    .trim()
+    .toLowerCase()
+    .includes('gemini-2.5-pro');
+
+const sanitizeGoogleModel = (model, fallback) =>
+  isBlockedGoogleModel(model) ? fallback : model;
+
 class MultiProviderAIService {
   constructor() {
     this.googleKeyStates = collectGoogleApiKeys().map((key, index) => ({
@@ -261,10 +270,22 @@ class MultiProviderAIService {
     longContext = false,
     runtimeConfig = {},
   } = {}) {
-    const flashModel = runtimeConfig.flashModel || DEFAULT_FLASH_MODEL;
-    const proModel = runtimeConfig.proModel || DEFAULT_PRO_MODEL;
-    const reviewModel = runtimeConfig.reviewModel || proModel;
-    const googleBackupModel = runtimeConfig.googleBackupModel || DEFAULT_GOOGLE_BACKUP_MODEL;
+    const flashModel = sanitizeGoogleModel(
+      runtimeConfig.flashModel || DEFAULT_FLASH_MODEL,
+      DEFAULT_FLASH_MODEL
+    );
+    const googleBackupModel = sanitizeGoogleModel(
+      runtimeConfig.googleBackupModel || DEFAULT_GOOGLE_BACKUP_MODEL,
+      flashModel
+    );
+    const proModel = sanitizeGoogleModel(
+      runtimeConfig.proModel || DEFAULT_PRO_MODEL,
+      googleBackupModel || flashModel
+    );
+    const reviewModel = sanitizeGoogleModel(
+      runtimeConfig.reviewModel || proModel,
+      proModel
+    );
     const finalModel = runtimeConfig.finalModel || runtimeConfig.bedrockModel || DEFAULT_BEDROCK_MODEL;
     const bedrockModel = runtimeConfig.bedrockModel || DEFAULT_BEDROCK_MODEL;
     const bulkProvider = runtimeConfig.bulkProvider || 'google';
@@ -326,7 +347,7 @@ class MultiProviderAIService {
 
       return {
         providerSequence: googleDeepSequence,
-        resolvedModel: model,
+        resolvedModel: sanitizeGoogleModel(model, selectGoogleDeepModel()),
         taskType,
       };
     }
@@ -564,7 +585,7 @@ class MultiProviderAIService {
             model:
               model && !String(model).startsWith('anthropic.')
                 ? model
-                : (runtimeConfig.flashModel || DEFAULT_FLASH_MODEL),
+                : sanitizeGoogleModel(runtimeConfig.flashModel || DEFAULT_FLASH_MODEL, DEFAULT_FLASH_MODEL),
             temperature,
             maxOutputTokens,
           });
@@ -580,8 +601,14 @@ class MultiProviderAIService {
               model && !String(model).startsWith('anthropic.')
                 ? model
                 : (taskType === 'review_reply'
-                    ? (runtimeConfig.reviewModel || runtimeConfig.proModel || DEFAULT_PRO_MODEL)
-                    : (runtimeConfig.proModel || DEFAULT_PRO_MODEL)),
+                    ? sanitizeGoogleModel(
+                        runtimeConfig.reviewModel || runtimeConfig.proModel || DEFAULT_PRO_MODEL,
+                        runtimeConfig.googleBackupModel || runtimeConfig.flashModel || DEFAULT_FLASH_MODEL
+                      )
+                    : sanitizeGoogleModel(
+                        runtimeConfig.proModel || DEFAULT_PRO_MODEL,
+                        runtimeConfig.googleBackupModel || runtimeConfig.flashModel || DEFAULT_FLASH_MODEL
+                      )),
             temperature,
             maxOutputTokens,
           });
@@ -596,7 +623,10 @@ class MultiProviderAIService {
             model:
               model && !String(model).startsWith('anthropic.')
                 ? model
-                : (runtimeConfig.googleBackupModel || DEFAULT_GOOGLE_BACKUP_MODEL),
+                : sanitizeGoogleModel(
+                    runtimeConfig.googleBackupModel || DEFAULT_GOOGLE_BACKUP_MODEL,
+                    runtimeConfig.flashModel || DEFAULT_FLASH_MODEL
+                  ),
             temperature,
             maxOutputTokens,
           });
