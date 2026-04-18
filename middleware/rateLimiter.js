@@ -48,7 +48,7 @@ try {
 /**
  * Build a rate limiter that uses Redis if available, memory otherwise
  */
-const makeLimiter = ({ windowMs, limit, keyGenerator, message, prefix, logLabel }) => {
+const makeLimiter = ({ windowMs, limit, keyGenerator, message, prefix, logLabel, skip }) => {
   const opts = {
     windowMs,
     limit,
@@ -66,6 +66,7 @@ const makeLimiter = ({ windowMs, limit, keyGenerator, message, prefix, logLabel 
   };
 
   if (keyGenerator) opts.keyGenerator = keyGenerator;
+  if (skip) opts.skip = skip;
 
   if (useRedis && RedisStore && redisClient) {
     opts.store = new RedisStore({
@@ -77,13 +78,37 @@ const makeLimiter = ({ windowMs, limit, keyGenerator, message, prefix, logLabel 
   return rateLimit(opts);
 };
 
-// General API rate limiter - 100 requests per 15 minutes
+const GENERAL_LIMIT_SKIP_ROUTES = new Set([
+  '/health',
+  '/api/health',
+  '/api/health/queue',
+  '/api/tracking/events',
+  '/api/auth/me',
+  '/api/profile',
+  '/api/integrations',
+  '/api/ai-config',
+]);
+
+const shouldSkipGeneralLimit = (req) => {
+  if (GENERAL_LIMIT_SKIP_ROUTES.has(req.path)) {
+    return true;
+  }
+
+  if (req.path === '/api/integrations/google/connect') {
+    return true;
+  }
+
+  return false;
+};
+
+// General API rate limiter - tuned to avoid throttling normal dashboard polling
 const generalLimiter = makeLimiter({
   windowMs: 15 * 60 * 1000,
-  limit: 100,
+  limit: 400,
   prefix: 'rl:general:',
   message: 'Too many requests, please try again later.',
-  logLabel: 'General rate limit exceeded'
+  logLabel: 'General rate limit exceeded',
+  skip: shouldSkipGeneralLimit
 });
 
 // Strict limiter for auth endpoints - 20 requests per 15 minutes
