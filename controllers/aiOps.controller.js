@@ -46,6 +46,7 @@ const aiOpsController = {
         'flashModel',
         'proModel',
         'reviewModel',
+        'googleBackupModel',
         'finalModel',
         'bedrockModel',
         'bulkProvider',

@@ -13,8 +13,18 @@ const defaultAiOpsConfig = {
   blockRoleChanges: true,
   blockPlanChanges: true,
   flashModel: process.env.GOOGLE_AI_FLASH_MODEL || 'gemini-2.5-flash',
-  proModel: process.env.GOOGLE_AI_PRO_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro',
-  reviewModel: process.env.GOOGLE_AI_REVIEW_MODEL || process.env.GOOGLE_AI_PRO_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro',
+  proModel:
+    process.env.GOOGLE_AI_PRO_MODEL ||
+    process.env.GOOGLE_AI_MODEL ||
+    process.env.GOOGLE_AI_FLASH_MODEL ||
+    'gemini-2.5-flash',
+  reviewModel:
+    process.env.GOOGLE_AI_REVIEW_MODEL ||
+    process.env.GOOGLE_AI_PRO_MODEL ||
+    process.env.GOOGLE_AI_MODEL ||
+    process.env.GOOGLE_AI_FLASH_MODEL ||
+    'gemini-2.5-flash',
+  googleBackupModel: process.env.GOOGLE_AI_BACKUP_MODEL || 'gemma-3-27b-it',
   finalModel:
     process.env.AI_FINAL_MODEL ||
     process.env.BEDROCK_CLAUDE_MODEL ||

@@ -18,7 +18,12 @@ const DEFAULT_COOLDOWN_MS = parseInt(process.env.GOOGLE_AI_KEY_COOLDOWN_MS || '9
 const DEFAULT_MAX_OUTPUT_TOKENS = parseInt(process.env.GOOGLE_AI_MAX_OUTPUT_TOKENS || '220', 10);
 const DEFAULT_TEMPERATURE = parseFloat(process.env.GOOGLE_AI_TEMPERATURE || '0.45');
 const DEFAULT_FLASH_MODEL = process.env.GOOGLE_AI_FLASH_MODEL || 'gemini-2.5-flash';
-const DEFAULT_PRO_MODEL = process.env.GOOGLE_AI_PRO_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro';
+const DEFAULT_PRO_MODEL =
+  process.env.GOOGLE_AI_PRO_MODEL ||
+  process.env.GOOGLE_AI_MODEL ||
+  process.env.GOOGLE_AI_FLASH_MODEL ||
+  'gemini-2.5-flash';
+const DEFAULT_GOOGLE_BACKUP_MODEL = process.env.GOOGLE_AI_BACKUP_MODEL || 'gemma-3-27b-it';
 const DEFAULT_BEDROCK_MODEL =
   process.env.BEDROCK_CLAUDE_MODEL ||
   process.env.AWS_BEDROCK_MODEL ||
@@ -234,22 +239,48 @@ class MultiProviderAIService {
     const flashModel = runtimeConfig.flashModel || DEFAULT_FLASH_MODEL;
     const proModel = runtimeConfig.proModel || DEFAULT_PRO_MODEL;
     const reviewModel = runtimeConfig.reviewModel || proModel;
+    const googleBackupModel = runtimeConfig.googleBackupModel || DEFAULT_GOOGLE_BACKUP_MODEL;
     const finalModel = runtimeConfig.finalModel || runtimeConfig.bedrockModel || DEFAULT_BEDROCK_MODEL;
     const bedrockModel = runtimeConfig.bedrockModel || DEFAULT_BEDROCK_MODEL;
     const bulkProvider = runtimeConfig.bulkProvider || 'google';
     const finalProvider = runtimeConfig.finalProvider || 'bedrock';
+    const googleFallbackAvailable =
+      !!googleBackupModel &&
+      googleBackupModel !== flashModel &&
+      googleBackupModel !== proModel &&
+      !String(googleBackupModel).startsWith('anthropic.');
+
+    const googleFastSequence = googleFallbackAvailable
+      ? ['google-flash', 'google-backup', 'bedrock']
+      : ['google-flash', 'bedrock'];
+    const googleDeepSequence = googleFallbackAvailable
+      ? ['google-deep', 'google-backup', 'google-flash', 'bedrock']
+      : ['google-deep', 'google-flash', 'bedrock'];
+
+    const selectGoogleDeepModel = () => {
+      if (taskType === 'review_reply' && reviewModel) {
+        return reviewModel;
+      }
+      if (proModel) {
+        return proModel;
+      }
+      if (googleFallbackAvailable) {
+        return googleBackupModel;
+      }
+      return flashModel;
+    };
 
     if (model) {
       if (String(model).startsWith('anthropic.')) {
         return {
-          providerSequence: ['bedrock', 'google-pro', 'google-flash'],
+          providerSequence: ['bedrock', 'google-deep', 'google-flash'],
           resolvedModel: model,
           taskType,
         };
       }
 
       return {
-        providerSequence: ['google-pro', 'google-flash', 'bedrock'],
+        providerSequence: googleDeepSequence,
         resolvedModel: model,
         taskType,
       };
@@ -257,7 +288,7 @@ class MultiProviderAIService {
 
     if (providerPreference === 'bedrock') {
       return {
-        providerSequence: ['bedrock', 'google-pro', 'google-flash'],
+        providerSequence: ['bedrock', 'google-deep', 'google-flash'],
         resolvedModel: bedrockModel,
         taskType,
       };
@@ -265,8 +296,8 @@ class MultiProviderAIService {
 
     if (longContext || quality === 'long_context') {
       return {
-        providerSequence: ['google-pro', 'bedrock', 'google-flash'],
-        resolvedModel: proModel,
+        providerSequence: googleDeepSequence,
+        resolvedModel: selectGoogleDeepModel(),
         taskType,
       };
     }
@@ -275,16 +306,16 @@ class MultiProviderAIService {
       return {
         providerSequence:
           finalProvider === 'google'
-            ? ['google-pro', 'bedrock', 'google-flash']
-            : ['bedrock', 'google-pro', 'google-flash'],
-        resolvedModel: finalProvider === 'google' ? proModel : finalModel,
+            ? googleDeepSequence
+            : ['bedrock', 'google-deep', 'google-flash'],
+        resolvedModel: finalProvider === 'google' ? selectGoogleDeepModel() : finalModel,
         taskType,
       };
     }
 
     if (taskType === 'review_reply') {
       return {
-        providerSequence: ['google-pro', 'google-flash', 'bedrock'],
+        providerSequence: googleDeepSequence,
         resolvedModel: reviewModel,
         taskType,
       };
@@ -294,15 +325,15 @@ class MultiProviderAIService {
       return {
         providerSequence:
           bulkProvider === 'bedrock'
-            ? ['bedrock', 'google-flash', 'google-pro']
-            : ['google-flash', 'google-pro', 'bedrock'],
+            ? ['bedrock', 'google-flash', 'google-deep']
+            : googleFastSequence,
         resolvedModel: bulkProvider === 'bedrock' ? bedrockModel : flashModel,
         taskType,
       };
     }
 
     return {
-      providerSequence: ['google-flash', 'google-pro', 'bedrock'],
+      providerSequence: googleFastSequence,
       resolvedModel: flashModel,
       taskType,
     };
@@ -494,7 +525,7 @@ class MultiProviderAIService {
           return result;
         }
 
-        if (route === 'google-pro') {
+        if (route === 'google-deep') {
           const result = await this.generateWithGoogle({
             prompt,
             systemInstruction,
@@ -504,6 +535,21 @@ class MultiProviderAIService {
                 : (taskType === 'review_reply'
                     ? (runtimeConfig.reviewModel || runtimeConfig.proModel || DEFAULT_PRO_MODEL)
                     : (runtimeConfig.proModel || DEFAULT_PRO_MODEL)),
+            temperature,
+            maxOutputTokens,
+          });
+          this.recordExecution({ taskType, route, provider: result.provider, model: result.model, success: true });
+          return result;
+        }
+
+        if (route === 'google-backup') {
+          const result = await this.generateWithGoogle({
+            prompt,
+            systemInstruction,
+            model:
+              model && !String(model).startsWith('anthropic.')
+                ? model
+                : (runtimeConfig.googleBackupModel || DEFAULT_GOOGLE_BACKUP_MODEL),
             temperature,
             maxOutputTokens,
           });
