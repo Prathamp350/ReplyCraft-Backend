@@ -75,6 +75,51 @@ const aiOpsController = {
     }
   },
 
+  updateGoogleKeyState: async (req, res) => {
+    try {
+      const keyIndex = parseInt(req.params.index, 10);
+      if (!Number.isInteger(keyIndex) || keyIndex < 1) {
+        return res.status(400).json({ success: false, error: 'Invalid key index' });
+      }
+
+      const enabled = req.body?.enabled !== false;
+      const config = await getAiOpsConfig();
+      const nextOverrides = {
+        ...(config.googleKeyOverrides || {}),
+        [String(keyIndex)]: enabled,
+      };
+
+      const updated = await updateAiOpsConfig({ googleKeyOverrides: nextOverrides }, req.user?._id);
+      const health = await googleAiService.getHealthSnapshot();
+      return res.status(200).json({ success: true, config: updated, health });
+    } catch (error) {
+      logger.error('Failed to update Google key state', { error: error.message });
+      return res.status(500).json({ success: false, error: 'Failed to update Google key state' });
+    }
+  },
+
+  refreshGoogleKeys: async (req, res) => {
+    try {
+      const keyIndex = req.body?.index ? parseInt(req.body.index, 10) : null;
+      if (keyIndex !== null && (!Number.isInteger(keyIndex) || keyIndex < 1)) {
+        return res.status(400).json({ success: false, error: 'Invalid key index' });
+      }
+
+      googleAiService.resetGoogleKeyStates(keyIndex);
+      const health = await googleAiService.getHealthSnapshot();
+      return res.status(200).json({
+        success: true,
+        message: keyIndex
+          ? `Gemini key ${keyIndex} state refreshed.`
+          : 'All Gemini key cooldown and invalid states refreshed.',
+        health,
+      });
+    } catch (error) {
+      logger.error('Failed to refresh Google key states', { error: error.message });
+      return res.status(500).json({ success: false, error: 'Failed to refresh Google key states' });
+    }
+  },
+
   generateMarketingDraft: async (req, res) => {
     try {
       const draft = await generateMarketingDraft({

@@ -32,6 +32,8 @@ router.post('/marketing/send', authorizeRoles('superadmin', 'admin'), adminContr
 router.get('/ai-ops/config', authorizeRoles('superadmin', 'admin'), aiOpsController.getConfig);
 router.put('/ai-ops/config', authorizeRoles('superadmin', 'admin'), aiOpsController.updateConfig);
 router.get('/ai-ops/health', authorizeRoles('superadmin', 'admin'), aiOpsController.getProviderHealth);
+router.put('/ai-ops/google-keys/:index', authorizeRoles('superadmin', 'admin'), aiOpsController.updateGoogleKeyState);
+router.post('/ai-ops/google-keys/refresh', authorizeRoles('superadmin', 'admin'), aiOpsController.refreshGoogleKeys);
 router.post('/ai-ops/marketing/draft', authorizeRoles('superadmin', 'admin'), aiOpsController.generateMarketingDraft);
 router.post('/ai-ops/finance/draft', authorizeRoles('superadmin', 'admin'), aiOpsController.generateFinanceDraft);
 router.post('/ai-ops/support/:ticketId/draft', authorizeRoles('superadmin', 'admin', 'support'), aiOpsController.generateSupportDraft);

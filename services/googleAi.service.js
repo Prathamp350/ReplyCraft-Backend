@@ -82,6 +82,7 @@ class MultiProviderAIService {
       lastUsedAt: 0,
       failureCount: 0,
       invalid: false,
+      disabled: false,
     }));
     this.lastGoogleIndex = -1;
     this.bedrockState = {
@@ -107,16 +108,24 @@ class MultiProviderAIService {
             lastUsedAt: 0,
             failureCount: 0,
             invalid: false,
+            disabled: false,
           };
     });
   }
 
+  applyGoogleKeyOverrides(runtimeConfig = {}) {
+    const overrides = runtimeConfig.googleKeyOverrides || {};
+    this.googleKeyStates = this.googleKeyStates.map((state) => ({
+      ...state,
+      disabled: overrides[String(state.index + 1)] === false,
+    }));
+  }
+
   getGoogleKeyState() {
-    this.refreshGoogleKeys();
 
     const now = Date.now();
     const availableStates = this.googleKeyStates.filter(
-      (state) => !state.invalid && state.cooldownUntil <= now
+      (state) => !state.disabled && !state.invalid && state.cooldownUntil <= now
     );
 
     if (!availableStates.length) {
@@ -126,7 +135,7 @@ class MultiProviderAIService {
     for (let offset = 1; offset <= this.googleKeyStates.length; offset += 1) {
       const candidateIndex = (this.lastGoogleIndex + offset) % this.googleKeyStates.length;
       const candidate = this.googleKeyStates[candidateIndex];
-      if (!candidate.invalid && candidate.cooldownUntil <= now) {
+      if (!candidate.disabled && !candidate.invalid && candidate.cooldownUntil <= now) {
         this.lastGoogleIndex = candidateIndex;
         candidate.lastUsedAt = now;
         return candidate;
@@ -170,6 +179,22 @@ class MultiProviderAIService {
     state.failureCount = 0;
     state.cooldownUntil = 0;
     state.invalid = false;
+  }
+
+  resetGoogleKeyStates(targetIndex = null) {
+    this.refreshGoogleKeys();
+    this.googleKeyStates = this.googleKeyStates.map((state) => {
+      if (targetIndex && state.index + 1 !== targetIndex) {
+        return state;
+      }
+
+      return {
+        ...state,
+        cooldownUntil: 0,
+        failureCount: 0,
+        invalid: false,
+      };
+    });
   }
 
   extractGoogleText(responseData) {
@@ -518,6 +543,7 @@ class MultiProviderAIService {
 
     this.refreshGoogleKeys();
     const runtimeConfig = await getAiRuntimeConfig();
+    this.applyGoogleKeyOverrides(runtimeConfig);
     const routing = this.resolveRouting({
       taskType,
       quality,
@@ -617,6 +643,7 @@ class MultiProviderAIService {
   async getHealthSnapshot() {
     this.refreshGoogleKeys();
     const runtimeConfig = await getAiRuntimeConfig();
+    this.applyGoogleKeyOverrides(runtimeConfig);
     const now = Date.now();
 
     let bedrockStatus = {
@@ -656,10 +683,11 @@ class MultiProviderAIService {
       google: {
         enabled: runtimeConfig.googleEnabled !== false,
         totalKeys: this.googleKeyStates.length,
-        activeKeys: this.googleKeyStates.filter((state) => !state.invalid && state.cooldownUntil <= now).length,
+        activeKeys: this.googleKeyStates.filter((state) => !state.disabled && !state.invalid && state.cooldownUntil <= now).length,
         keys: this.googleKeyStates.map((state) => ({
           index: state.index + 1,
-          status: state.invalid ? 'invalid' : state.cooldownUntil > now ? 'cooling' : 'active',
+          enabled: !state.disabled,
+          status: state.disabled ? 'disabled' : state.invalid ? 'invalid' : state.cooldownUntil > now ? 'cooling' : 'active',
           cooldownUntil: state.cooldownUntil || 0,
           failureCount: state.failureCount,
           lastUsedAt: state.lastUsedAt || 0,
