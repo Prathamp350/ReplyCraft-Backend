@@ -68,6 +68,18 @@ const businessConnectionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'AIConfiguration',
     default: null
+  },
+  connectedAt: {
+    type: Date,
+    default: null
+  },
+  syncStartAt: {
+    type: Date,
+    default: null
+  },
+  lastSyncAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true

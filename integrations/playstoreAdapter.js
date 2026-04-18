@@ -43,6 +43,22 @@ class PlayStoreAdapter extends BaseAdapter {
     }
   }
 
+  async resolveConnectionTarget(identifier) {
+    try {
+      const app = await gplay.app({ appId: identifier });
+      if (!app?.appId) return null;
+
+      return {
+        locationId: app.appId,
+        locationName: app.title || identifier,
+        rawData: app
+      };
+    } catch (error) {
+      console.error('Play Store identifier resolve error:', error.message);
+      return null;
+    }
+  }
+
   /**
    * Fetch reviews from Google Play Store API via Scraper
    */
