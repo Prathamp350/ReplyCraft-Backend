@@ -150,6 +150,14 @@ const toMarketingHtml = (message = '') => {
     .join('');
 };
 
+const parseManualEmails = (value) =>
+  String(value || '')
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+
 /**
  * Create a new staff account
  * Superadmin can create: admin, finance, support, superadmin
@@ -428,6 +436,7 @@ module.exports = {
         subject,
         message,
         preheader,
+        customEmails,
         search,
         plan,
         subscriptionStatus,
@@ -461,9 +470,33 @@ module.exports = {
         dateTo,
       });
 
-      const recipients = await User.find(filter)
+      const platformRecipients = await User.find(filter)
         .select('name email plan subscriptionStatus country state')
         .lean();
+
+      const manualEmailList = [...new Set(parseManualEmails(customEmails))];
+      const invalidManualEmails = manualEmailList.filter((email) => !isValidEmail(email));
+
+      if (invalidManualEmails.length) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid email address: ${invalidManualEmails[0]}`,
+        });
+      }
+
+      const manualRecipients = manualEmailList.map((email) => ({
+        name: email.split('@')[0] || 'there',
+        email,
+        plan: 'manual',
+      }));
+
+      const recipientsByEmail = new Map();
+      [...platformRecipients, ...manualRecipients].forEach((recipient) => {
+        if (!recipient?.email) return;
+        recipientsByEmail.set(String(recipient.email).trim().toLowerCase(), recipient);
+      });
+
+      const recipients = [...recipientsByEmail.values()];
 
       if (!recipients.length) {
         return res.status(404).json({ success: false, error: 'No matching users found for this audience.' });
@@ -496,6 +529,7 @@ module.exports = {
         success: true,
         message: `Broadcast queued for ${recipients.length} user${recipients.length === 1 ? '' : 's'}.`,
         queuedRecipients: recipients.length,
+        manualRecipients: manualRecipients.length,
       });
     } catch (error) {
       logger.error('Failed to queue marketing broadcast', { error: error.message, stack: error.stack });
