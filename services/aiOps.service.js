@@ -1,21 +1,11 @@
 const googleAiService = require('./googleAi.service');
 const Ticket = require('../models/Ticket');
-const SystemConfig = require('../models/SystemConfig');
-
-const defaultAiOpsConfig = {
-  globalEnabled: false,
-  marketingEnabled: true,
-  supportEnabled: true,
-  financeEnabled: true,
-  emergencyStop: false,
-  supportAutoEmail: false,
-  marketingAutoSend: false,
-  financeAutoSend: false,
-  blockDestructiveActions: true,
-  blockRoleChanges: true,
-  blockPlanChanges: true,
-  lastUpdatedAt: null,
-};
+const {
+  defaultAiOpsConfig,
+  getSystemConfig,
+  getAiRuntimeConfig,
+  updateAiRuntimeConfig,
+} = require('./aiRuntimeConfig.service');
 
 const parseJsonResponse = (text) => {
   const trimmed = String(text || '').trim();
@@ -27,35 +17,12 @@ const parseJsonResponse = (text) => {
   return JSON.parse(jsonText);
 };
 
-async function getSystemConfig() {
-  let config = await SystemConfig.findOne({ configId: 'global' });
-  if (!config) {
-    config = await SystemConfig.create({ configId: 'global' });
-  }
-  return config;
-}
-
 async function getAiOpsConfig() {
-  const config = await getSystemConfig();
-  return {
-    ...defaultAiOpsConfig,
-    ...(config.aiOps || {}),
-  };
+  return getAiRuntimeConfig();
 }
 
 async function updateAiOpsConfig(patch, userId = null) {
-  const config = await getSystemConfig();
-  config.aiOps = {
-    ...defaultAiOpsConfig,
-    ...(config.aiOps || {}),
-    ...patch,
-    lastUpdatedAt: new Date(),
-  };
-  if (userId) {
-    config.updatedBy = userId;
-  }
-  await config.save();
-  return config.aiOps;
+  return updateAiRuntimeConfig(patch, userId);
 }
 
 async function assertAiScopeEnabled(scope) {
@@ -106,6 +73,8 @@ Return JSON with:
 }`,
     maxOutputTokens: 700,
     temperature: 0.55,
+    taskType: 'draft',
+    quality: 'standard',
   });
 
   return parseJsonResponse(response);
@@ -132,6 +101,8 @@ Return JSON with:
 }`,
     maxOutputTokens: 700,
     temperature: 0.35,
+    taskType: 'draft',
+    quality: 'final',
   });
 
   return parseJsonResponse(response);
@@ -180,6 +151,9 @@ Return JSON with:
 }`,
     maxOutputTokens: 800,
     temperature: 0.4,
+    taskType: 'support_ticket',
+    quality: 'final',
+    longContext: notesSummary.length > 5000 || ticket.message.length > 4000,
   });
 
   return {

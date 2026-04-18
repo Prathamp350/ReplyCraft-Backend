@@ -9,6 +9,7 @@ const {
   generateFinanceDraft,
   generateSupportDraft,
 } = require('../services/aiOps.service');
+const googleAiService = require('../services/googleAi.service');
 const { queueSupportAiReplyEmail } = require('../queues/email.queue');
 
 const safeSupportStatus = (value) => {
@@ -42,6 +43,13 @@ const aiOpsController = {
         'blockDestructiveActions',
         'blockRoleChanges',
         'blockPlanChanges',
+        'flashModel',
+        'proModel',
+        'reviewModel',
+        'finalModel',
+        'bedrockModel',
+        'bulkProvider',
+        'finalProvider',
       ];
       const patch = Object.fromEntries(
         Object.entries(req.body || {}).filter(([key]) => allowed.includes(key))
@@ -51,6 +59,16 @@ const aiOpsController = {
     } catch (error) {
       logger.error('Failed to update AI ops config', { error: error.message });
       return res.status(500).json({ success: false, error: 'Failed to update AI ops configuration' });
+    }
+  },
+
+  getProviderHealth: async (_req, res) => {
+    try {
+      const health = await googleAiService.getHealthSnapshot();
+      return res.status(200).json({ success: true, health });
+    } catch (error) {
+      logger.error('Failed to fetch AI provider health', { error: error.message });
+      return res.status(500).json({ success: false, error: 'Failed to fetch AI provider health' });
     }
   },
 

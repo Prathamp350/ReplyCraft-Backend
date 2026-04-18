@@ -107,7 +107,11 @@ async function generateReplyForReview({ review, user, connection = null }) {
   const rawReply = await googleAiService.generateText({
     prompt,
     systemInstruction: aiConfiguration?.systemPrompt,
-    model: process.env.GOOGLE_AI_TUNED_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro',
+    taskType: 'review_reply',
+    quality: 'standard',
+    ...(process.env.GOOGLE_AI_TUNED_MODEL
+      ? { model: process.env.GOOGLE_AI_TUNED_MODEL }
+      : {}),
   });
 
   let replyText = cleanReplyUtil.cleanReply(rawReply);

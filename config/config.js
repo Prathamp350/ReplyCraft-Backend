@@ -115,12 +115,19 @@ module.exports = {
   },
   
   googleAI: {
-    model: process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro',
+    model: process.env.GOOGLE_AI_MODEL || process.env.GOOGLE_AI_PRO_MODEL || 'gemini-2.5-pro',
     temperature: parseFloat(process.env.GOOGLE_AI_TEMPERATURE) || 0.45,
     maxOutputTokens: parseInt(process.env.GOOGLE_AI_MAX_OUTPUT_TOKENS) || 220
   },
   
-  allowedModels: (process.env.ALLOWED_MODELS || 'gemini-2.5-pro,gemini-2.5-flash').split(','),
+  allowedModels: (
+    process.env.ALLOWED_MODELS ||
+    [
+      process.env.GOOGLE_AI_FLASH_MODEL || 'gemini-2.5-flash',
+      process.env.GOOGLE_AI_PRO_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro',
+      process.env.BEDROCK_CLAUDE_MODEL || process.env.AWS_BEDROCK_MODEL || 'anthropic.claude-3-sonnet-20240229-v1:0',
+    ].join(',')
+  ).split(','),
   
   plans,
   defaultPlan: 'free',

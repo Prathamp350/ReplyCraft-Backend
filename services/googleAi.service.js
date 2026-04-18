@@ -1,12 +1,28 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
+const { getAiRuntimeConfig } = require('./aiRuntimeConfig.service');
+
+let BedrockRuntimeClient;
+let ConverseCommand;
+
+try {
+  ({ BedrockRuntimeClient, ConverseCommand } = require('@aws-sdk/client-bedrock-runtime'));
+} catch (error) {
+  BedrockRuntimeClient = null;
+  ConverseCommand = null;
+}
 
 const GOOGLE_AI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-const DEFAULT_MODEL = process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro';
 const DEFAULT_TIMEOUT_MS = parseInt(process.env.GOOGLE_AI_TIMEOUT_MS || '45000', 10);
 const DEFAULT_COOLDOWN_MS = parseInt(process.env.GOOGLE_AI_KEY_COOLDOWN_MS || '900000', 10);
 const DEFAULT_MAX_OUTPUT_TOKENS = parseInt(process.env.GOOGLE_AI_MAX_OUTPUT_TOKENS || '220', 10);
 const DEFAULT_TEMPERATURE = parseFloat(process.env.GOOGLE_AI_TEMPERATURE || '0.45');
+const DEFAULT_FLASH_MODEL = process.env.GOOGLE_AI_FLASH_MODEL || 'gemini-2.5-flash';
+const DEFAULT_PRO_MODEL = process.env.GOOGLE_AI_PRO_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro';
+const DEFAULT_BEDROCK_MODEL =
+  process.env.BEDROCK_CLAUDE_MODEL ||
+  process.env.AWS_BEDROCK_MODEL ||
+  'anthropic.claude-3-sonnet-20240229-v1:0';
 
 const splitKeys = (value) =>
   String(value || '')
@@ -14,7 +30,7 @@ const splitKeys = (value) =>
     .map((key) => key.trim())
     .filter(Boolean);
 
-const collectApiKeys = () => {
+const collectGoogleApiKeys = () => {
   const keys = [
     ...splitKeys(process.env.GOOGLE_AI_API_KEYS),
     ...splitKeys(process.env.GOOGLE_AI_API_KEY),
@@ -29,23 +45,53 @@ const collectApiKeys = () => {
   return [...new Set(keys)];
 };
 
-class GoogleAIService {
+const hasBedrockCredentials = () =>
+  !!(
+    (process.env.AWS_ACCESS_KEY_ID || process.env.BEDROCK_ACCESS_KEY_ID) &&
+    (process.env.AWS_SECRET_ACCESS_KEY || process.env.BEDROCK_SECRET_ACCESS_KEY) &&
+    (process.env.AWS_REGION || process.env.BEDROCK_REGION || process.env.AWS_DEFAULT_REGION)
+  );
+
+const shouldCooldownGoogleError = (error) => {
+  const status = error?.response?.status;
+  const message = JSON.stringify(error?.response?.data || '').toLowerCase();
+
+  return (
+    status === 429 ||
+    status === 403 ||
+    message.includes('resource_exhausted') ||
+    message.includes('quota') ||
+    message.includes('rate limit') ||
+    message.includes('api key not valid') ||
+    message.includes('api_key_invalid') ||
+    message.includes('permission denied')
+  );
+};
+
+class MultiProviderAIService {
   constructor() {
-    this.keyStates = collectApiKeys().map((key, index) => ({
+    this.googleKeyStates = collectGoogleApiKeys().map((key, index) => ({
       key,
       index,
       cooldownUntil: 0,
       lastUsedAt: 0,
       failureCount: 0,
+      invalid: false,
     }));
-    this.lastIndex = -1;
+    this.lastGoogleIndex = -1;
+    this.bedrockState = {
+      cooldownUntil: 0,
+      failureCount: 0,
+      client: null,
+    };
+    this.recentExecutions = [];
   }
 
-  refreshKeys() {
-    const latestKeys = collectApiKeys();
-    const existingByKey = new Map(this.keyStates.map((state) => [state.key, state]));
+  refreshGoogleKeys() {
+    const latestKeys = collectGoogleApiKeys();
+    const existingByKey = new Map(this.googleKeyStates.map((state) => [state.key, state]));
 
-    this.keyStates = latestKeys.map((key, index) => {
+    this.googleKeyStates = latestKeys.map((key, index) => {
       const existing = existingByKey.get(key);
       return existing
         ? { ...existing, index }
@@ -55,73 +101,73 @@ class GoogleAIService {
             cooldownUntil: 0,
             lastUsedAt: 0,
             failureCount: 0,
+            invalid: false,
           };
     });
   }
 
-  getAvailableKeyState() {
-    this.refreshKeys();
-
-    if (!this.keyStates.length) {
-      throw new Error(
-        'No Google AI API keys configured. Set GOOGLE_AI_API_KEYS or GOOGLE_AI_API_KEY_1..N in backend/.env.'
-      );
-    }
+  getGoogleKeyState() {
+    this.refreshGoogleKeys();
 
     const now = Date.now();
-    const availableStates = this.keyStates.filter((state) => state.cooldownUntil <= now);
+    const availableStates = this.googleKeyStates.filter(
+      (state) => !state.invalid && state.cooldownUntil <= now
+    );
 
     if (!availableStates.length) {
-      const nextReadyAt = Math.min(...this.keyStates.map((state) => state.cooldownUntil));
-      const waitMs = Math.max(nextReadyAt - now, 1000);
-      throw new Error(`All Google AI API keys are cooling down. Retry in ${Math.ceil(waitMs / 1000)}s.`);
+      return null;
     }
 
-    for (let offset = 1; offset <= this.keyStates.length; offset += 1) {
-      const candidateIndex = (this.lastIndex + offset) % this.keyStates.length;
-      const candidate = this.keyStates[candidateIndex];
-      if (candidate.cooldownUntil <= now) {
-        this.lastIndex = candidateIndex;
+    for (let offset = 1; offset <= this.googleKeyStates.length; offset += 1) {
+      const candidateIndex = (this.lastGoogleIndex + offset) % this.googleKeyStates.length;
+      const candidate = this.googleKeyStates[candidateIndex];
+      if (!candidate.invalid && candidate.cooldownUntil <= now) {
+        this.lastGoogleIndex = candidateIndex;
         candidate.lastUsedAt = now;
         return candidate;
       }
     }
 
-    const fallback = availableStates[0];
-    this.lastIndex = fallback.index;
-    fallback.lastUsedAt = now;
-    return fallback;
+    return availableStates[0];
   }
 
-  markFailure(state, error) {
-    state.failureCount += 1;
+  markGoogleFailure(state, error) {
+    if (!state) return;
 
-    const status = error?.response?.status;
+    state.failureCount += 1;
     const retryAfter = parseInt(error?.response?.headers?.['retry-after'] || '0', 10);
     const message = JSON.stringify(error?.response?.data || '').toLowerCase();
-    const quotaLimited =
-      status === 429 ||
-      message.includes('resource_exhausted') ||
-      message.includes('quota') ||
-      message.includes('rate limit');
 
-    if (quotaLimited) {
+    if (
+      message.includes('api key not valid') ||
+      message.includes('api_key_invalid') ||
+      message.includes('permission denied')
+    ) {
+      state.invalid = true;
+      state.cooldownUntil = Date.now() + 24 * 60 * 60 * 1000;
+      logger.warn('Google AI key marked invalid', { keyIndex: state.index + 1 });
+      return;
+    }
+
+    if (shouldCooldownGoogleError(error)) {
       const cooldownMs = retryAfter > 0 ? retryAfter * 1000 : DEFAULT_COOLDOWN_MS;
       state.cooldownUntil = Date.now() + cooldownMs;
       logger.warn('Google AI key placed on cooldown', {
         keyIndex: state.index + 1,
         cooldownMs,
-        status,
+        status: error?.response?.status,
       });
     }
   }
 
-  markSuccess(state) {
+  markGoogleSuccess(state) {
+    if (!state) return;
     state.failureCount = 0;
     state.cooldownUntil = 0;
+    state.invalid = false;
   }
 
-  extractText(responseData) {
+  extractGoogleText(responseData) {
     const candidates = responseData?.candidates || [];
     const parts = candidates[0]?.content?.parts || [];
     const text = parts
@@ -136,25 +182,153 @@ class GoogleAIService {
     return text;
   }
 
-  async generateText({
-    prompt,
-    systemInstruction,
-    model = DEFAULT_MODEL,
-    temperature = DEFAULT_TEMPERATURE,
-    maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS,
-  }) {
-    if (!prompt || !String(prompt).trim()) {
-      throw new Error('Prompt is required for Google AI generation.');
+  extractBedrockText(responseData) {
+    const parts = responseData?.output?.message?.content || [];
+    const text = parts
+      .map((part) => part?.text || '')
+      .join('')
+      .trim();
+
+    if (!text) {
+      throw new Error('Amazon Bedrock returned an empty response.');
     }
 
-    const attempts = [];
+    return text;
+  }
 
-    while (attempts.length < Math.max(this.keyStates.length, 1)) {
-      const state = this.getAvailableKeyState();
+  getBedrockClient() {
+    if (!BedrockRuntimeClient || !ConverseCommand) {
+      throw new Error(
+        'Amazon Bedrock SDK is not installed. Run npm install @aws-sdk/client-bedrock-runtime in backend.'
+      );
+    }
+
+    if (!hasBedrockCredentials()) {
+      throw new Error(
+        'Amazon Bedrock credentials are missing. Set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION.'
+      );
+    }
+
+    if (!this.bedrockState.client) {
+      this.bedrockState.client = new BedrockRuntimeClient({
+        region: process.env.AWS_REGION || process.env.BEDROCK_REGION || process.env.AWS_DEFAULT_REGION,
+        credentials: {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID || process.env.BEDROCK_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || process.env.BEDROCK_SECRET_ACCESS_KEY,
+          sessionToken: process.env.AWS_SESSION_TOKEN || process.env.BEDROCK_SESSION_TOKEN,
+        },
+      });
+    }
+
+    return this.bedrockState.client;
+  }
+
+  resolveRouting({
+    taskType = 'general',
+    quality = 'standard',
+    providerPreference,
+    model,
+    longContext = false,
+    runtimeConfig = {},
+  } = {}) {
+    const flashModel = runtimeConfig.flashModel || DEFAULT_FLASH_MODEL;
+    const proModel = runtimeConfig.proModel || DEFAULT_PRO_MODEL;
+    const reviewModel = runtimeConfig.reviewModel || proModel;
+    const finalModel = runtimeConfig.finalModel || runtimeConfig.bedrockModel || DEFAULT_BEDROCK_MODEL;
+    const bedrockModel = runtimeConfig.bedrockModel || DEFAULT_BEDROCK_MODEL;
+    const bulkProvider = runtimeConfig.bulkProvider || 'google';
+    const finalProvider = runtimeConfig.finalProvider || 'bedrock';
+
+    if (model) {
+      if (String(model).startsWith('anthropic.')) {
+        return {
+          providerSequence: ['bedrock', 'google-pro', 'google-flash'],
+          resolvedModel: model,
+          taskType,
+        };
+      }
+
+      return {
+        providerSequence: ['google-pro', 'google-flash', 'bedrock'],
+        resolvedModel: model,
+        taskType,
+      };
+    }
+
+    if (providerPreference === 'bedrock') {
+      return {
+        providerSequence: ['bedrock', 'google-pro', 'google-flash'],
+        resolvedModel: bedrockModel,
+        taskType,
+      };
+    }
+
+    if (longContext || quality === 'long_context') {
+      return {
+        providerSequence: ['google-pro', 'bedrock', 'google-flash'],
+        resolvedModel: proModel,
+        taskType,
+      };
+    }
+
+    if (quality === 'final' || taskType === 'final_output') {
+      return {
+        providerSequence:
+          finalProvider === 'google'
+            ? ['google-pro', 'bedrock', 'google-flash']
+            : ['bedrock', 'google-pro', 'google-flash'],
+        resolvedModel: finalProvider === 'google' ? proModel : finalModel,
+        taskType,
+      };
+    }
+
+    if (taskType === 'review_reply') {
+      return {
+        providerSequence: ['google-pro', 'google-flash', 'bedrock'],
+        resolvedModel: reviewModel,
+        taskType,
+      };
+    }
+
+    if (taskType === 'bulk' || taskType === 'draft' || taskType === 'classification') {
+      return {
+        providerSequence:
+          bulkProvider === 'bedrock'
+            ? ['bedrock', 'google-flash', 'google-pro']
+            : ['google-flash', 'google-pro', 'bedrock'],
+        resolvedModel: bulkProvider === 'bedrock' ? bedrockModel : flashModel,
+        taskType,
+      };
+    }
+
+    return {
+      providerSequence: ['google-flash', 'google-pro', 'bedrock'],
+      resolvedModel: flashModel,
+      taskType,
+    };
+  }
+
+  recordExecution(entry) {
+    this.recentExecutions.unshift({
+      timestamp: new Date().toISOString(),
+      ...entry,
+    });
+    this.recentExecutions = this.recentExecutions.slice(0, 40);
+  }
+
+  async generateWithGoogle({ prompt, systemInstruction, model, temperature, maxOutputTokens }) {
+    const attempts = [];
+    const tryCount = Math.max(this.googleKeyStates.length, 1);
+
+    while (attempts.length < tryCount) {
+      const state = this.getGoogleKeyState();
+      if (!state) {
+        break;
+      }
 
       try {
         const response = await axios.post(
-          `${GOOGLE_AI_BASE_URL}/models/${model}:generateContent?key=${encodeURIComponent(state.key)}`,
+          `${GOOGLE_AI_BASE_URL}/models/${model}:generateContent`,
           {
             ...(systemInstruction
               ? {
@@ -178,33 +352,252 @@ class GoogleAIService {
             timeout: DEFAULT_TIMEOUT_MS,
             headers: {
               'Content-Type': 'application/json',
+              'x-goog-api-key': state.key,
             },
           }
         );
 
-        this.markSuccess(state);
-        return this.extractText(response.data);
+        this.markGoogleSuccess(state);
+        return {
+          text: this.extractGoogleText(response.data),
+          provider: 'google',
+          model,
+          keyIndex: state.index + 1,
+        };
       } catch (error) {
         attempts.push({
+          provider: 'google',
           keyIndex: state.index + 1,
           status: error?.response?.status || 0,
           message: error?.response?.data?.error?.message || error.message,
         });
-        this.markFailure(state, error);
+        this.markGoogleFailure(state, error);
 
         logger.warn('Google AI request failed on key', {
           keyIndex: state.index + 1,
           status: error?.response?.status,
           message: error?.response?.data?.error?.message || error.message,
+          model,
         });
       }
     }
 
     const finalAttempt = attempts[attempts.length - 1];
-    throw new Error(
-      finalAttempt?.message || 'Google AI generation failed across all configured API keys.'
+    const error = new Error(
+      finalAttempt?.message ||
+        'Google AI generation failed across all configured API keys.'
     );
+    error.attempts = attempts;
+    throw error;
+  }
+
+  async generateWithBedrock({ prompt, systemInstruction, model, temperature, maxOutputTokens }) {
+    const now = Date.now();
+    if (this.bedrockState.cooldownUntil > now) {
+      const waitMs = this.bedrockState.cooldownUntil - now;
+      throw new Error(`Amazon Bedrock is cooling down. Retry in ${Math.ceil(waitMs / 1000)}s.`);
+    }
+
+    try {
+      const client = this.getBedrockClient();
+      const response = await client.send(
+        new ConverseCommand({
+          modelId: model || DEFAULT_BEDROCK_MODEL,
+          system: systemInstruction ? [{ text: systemInstruction }] : undefined,
+          messages: [
+            {
+              role: 'user',
+              content: [{ text: prompt }],
+            },
+          ],
+          inferenceConfig: {
+            maxTokens: maxOutputTokens,
+            temperature,
+          },
+        })
+      );
+
+      this.bedrockState.failureCount = 0;
+      this.bedrockState.cooldownUntil = 0;
+
+      return {
+        text: this.extractBedrockText(response),
+        provider: 'bedrock',
+        model: model || DEFAULT_BEDROCK_MODEL,
+      };
+    } catch (error) {
+      this.bedrockState.failureCount += 1;
+
+      const message = error?.message || '';
+      const shouldCooldown =
+        message.toLowerCase().includes('throttl') ||
+        message.toLowerCase().includes('quota') ||
+        message.toLowerCase().includes('rate exceeded');
+
+      if (shouldCooldown) {
+        this.bedrockState.cooldownUntil = Date.now() + DEFAULT_COOLDOWN_MS;
+      }
+
+      logger.warn('Amazon Bedrock request failed', {
+        message,
+        model: model || DEFAULT_BEDROCK_MODEL,
+      });
+
+      const wrapped = new Error(message || 'Amazon Bedrock request failed.');
+      wrapped.provider = 'bedrock';
+      throw wrapped;
+    }
+  }
+
+  async generateTextWithMetadata({
+    prompt,
+    systemInstruction,
+    model,
+    temperature = DEFAULT_TEMPERATURE,
+    maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS,
+    taskType = 'general',
+    quality = 'standard',
+    providerPreference,
+    longContext = false,
+  }) {
+    if (!prompt || !String(prompt).trim()) {
+      throw new Error('Prompt is required for AI generation.');
+    }
+
+    this.refreshGoogleKeys();
+    const runtimeConfig = await getAiRuntimeConfig();
+    const routing = this.resolveRouting({
+      taskType,
+      quality,
+      providerPreference,
+      model,
+      longContext,
+      runtimeConfig,
+    });
+
+    const errors = [];
+
+    for (const route of routing.providerSequence) {
+      try {
+        if (route === 'google-flash') {
+          const result = await this.generateWithGoogle({
+            prompt,
+            systemInstruction,
+            model:
+              model && !String(model).startsWith('anthropic.')
+                ? model
+                : (runtimeConfig.flashModel || DEFAULT_FLASH_MODEL),
+            temperature,
+            maxOutputTokens,
+          });
+          this.recordExecution({ taskType, route, provider: result.provider, model: result.model, success: true });
+          return result;
+        }
+
+        if (route === 'google-pro') {
+          const result = await this.generateWithGoogle({
+            prompt,
+            systemInstruction,
+            model:
+              model && !String(model).startsWith('anthropic.')
+                ? model
+                : (taskType === 'review_reply'
+                    ? (runtimeConfig.reviewModel || runtimeConfig.proModel || DEFAULT_PRO_MODEL)
+                    : (runtimeConfig.proModel || DEFAULT_PRO_MODEL)),
+            temperature,
+            maxOutputTokens,
+          });
+          this.recordExecution({ taskType, route, provider: result.provider, model: result.model, success: true });
+          return result;
+        }
+
+        if (route === 'bedrock') {
+          const result = await this.generateWithBedrock({
+            prompt,
+            systemInstruction,
+            model:
+              model && String(model).startsWith('anthropic.')
+                ? model
+                : (runtimeConfig.bedrockModel || runtimeConfig.finalModel || DEFAULT_BEDROCK_MODEL),
+            temperature,
+            maxOutputTokens,
+          });
+          this.recordExecution({ taskType, route, provider: result.provider, model: result.model, success: true });
+          return result;
+        }
+      } catch (error) {
+        errors.push({
+          route,
+          message: error.message,
+          attempts: error.attempts || [],
+        });
+        this.recordExecution({ taskType, route, provider: route.startsWith('google') ? 'google' : 'bedrock', model: routing.resolvedModel, success: false, error: error.message });
+      }
+    }
+
+    const summary = errors
+      .map((entry) => `${entry.route}: ${entry.message}`)
+      .join(' | ');
+
+    throw new Error(summary || 'AI generation failed across all configured providers.');
+  }
+
+  async generateText(options) {
+    const result = await this.generateTextWithMetadata(options);
+    return result.text;
+  }
+
+  async getHealthSnapshot() {
+    this.refreshGoogleKeys();
+    const runtimeConfig = await getAiRuntimeConfig();
+    const now = Date.now();
+
+    let bedrockStatus = {
+      configured: hasBedrockCredentials(),
+      sdkInstalled: !!(BedrockRuntimeClient && ConverseCommand),
+      reachable: false,
+      cooldownUntil: this.bedrockState.cooldownUntil || 0,
+      failureCount: this.bedrockState.failureCount,
+      model: runtimeConfig.bedrockModel || runtimeConfig.finalModel || DEFAULT_BEDROCK_MODEL,
+    };
+
+    try {
+      this.getBedrockClient();
+      bedrockStatus = {
+        ...bedrockStatus,
+        reachable: true,
+      };
+    } catch (error) {
+      bedrockStatus = {
+        ...bedrockStatus,
+        reachable: false,
+        error: error.message,
+      };
+    }
+
+    return {
+      runtimeConfig,
+      google: {
+        totalKeys: this.googleKeyStates.length,
+        activeKeys: this.googleKeyStates.filter((state) => !state.invalid && state.cooldownUntil <= now).length,
+        keys: this.googleKeyStates.map((state) => ({
+          index: state.index + 1,
+          status: state.invalid ? 'invalid' : state.cooldownUntil > now ? 'cooling' : 'active',
+          cooldownUntil: state.cooldownUntil || 0,
+          failureCount: state.failureCount,
+          lastUsedAt: state.lastUsedAt || 0,
+        })),
+      },
+      bedrock: bedrockStatus,
+      routing: {
+        bulk: this.resolveRouting({ taskType: 'draft', runtimeConfig }),
+        reviewReply: this.resolveRouting({ taskType: 'review_reply', runtimeConfig }),
+        finalOutput: this.resolveRouting({ quality: 'final', runtimeConfig }),
+        longContext: this.resolveRouting({ longContext: true, runtimeConfig }),
+      },
+      recentExecutions: this.recentExecutions,
+    };
   }
 }
 
-module.exports = new GoogleAIService();
+module.exports = new MultiProviderAIService();

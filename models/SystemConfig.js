@@ -37,6 +37,13 @@ const systemConfigSchema = new mongoose.Schema({
     blockDestructiveActions: { type: Boolean, default: true },
     blockRoleChanges: { type: Boolean, default: true },
     blockPlanChanges: { type: Boolean, default: true },
+    flashModel: { type: String, default: process.env.GOOGLE_AI_FLASH_MODEL || 'gemini-2.5-flash' },
+    proModel: { type: String, default: process.env.GOOGLE_AI_PRO_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro' },
+    reviewModel: { type: String, default: process.env.GOOGLE_AI_REVIEW_MODEL || process.env.GOOGLE_AI_PRO_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro' },
+    finalModel: { type: String, default: process.env.AI_FINAL_MODEL || process.env.BEDROCK_CLAUDE_MODEL || process.env.AWS_BEDROCK_MODEL || 'anthropic.claude-3-sonnet-20240229-v1:0' },
+    bedrockModel: { type: String, default: process.env.BEDROCK_CLAUDE_MODEL || process.env.AWS_BEDROCK_MODEL || 'anthropic.claude-3-sonnet-20240229-v1:0' },
+    bulkProvider: { type: String, default: process.env.AI_BULK_PROVIDER || 'google' },
+    finalProvider: { type: String, default: process.env.AI_FINAL_PROVIDER || 'bedrock' },
     lastUpdatedAt: { type: Date, default: null }
   },
   updatedBy: {
@@ -69,6 +76,13 @@ systemConfigSchema.pre('save', function(next) {
       blockDestructiveActions: true,
       blockRoleChanges: true,
       blockPlanChanges: true,
+      flashModel: process.env.GOOGLE_AI_FLASH_MODEL || 'gemini-2.5-flash',
+      proModel: process.env.GOOGLE_AI_PRO_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro',
+      reviewModel: process.env.GOOGLE_AI_REVIEW_MODEL || process.env.GOOGLE_AI_PRO_MODEL || process.env.GOOGLE_AI_MODEL || 'gemini-2.5-pro',
+      finalModel: process.env.AI_FINAL_MODEL || process.env.BEDROCK_CLAUDE_MODEL || process.env.AWS_BEDROCK_MODEL || 'anthropic.claude-3-sonnet-20240229-v1:0',
+      bedrockModel: process.env.BEDROCK_CLAUDE_MODEL || process.env.AWS_BEDROCK_MODEL || 'anthropic.claude-3-sonnet-20240229-v1:0',
+      bulkProvider: process.env.AI_BULK_PROVIDER || 'google',
+      finalProvider: process.env.AI_FINAL_PROVIDER || 'bedrock',
       lastUpdatedAt: null
     };
   }
