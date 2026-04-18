@@ -59,7 +59,7 @@ async function generateMarketingDraft({ brief, audienceSummary }) {
 
   const response = await googleAiService.generateText({
     systemInstruction:
-      'You are ReplyCraft marketing AI. Draft polished SaaS campaign copy. Never suggest legal guarantees, fake discounts, or misleading urgency. Return valid JSON only.',
+      'You are ReplyCraft marketing AI. Draft polished SaaS campaign copy. Never suggest legal guarantees, fake discounts, or misleading urgency. If the request is missing critical details like dates, times, timezone, impacted services, audience, CTA, or rollout conditions, do not invent placeholders. Ask for clarification instead. Return valid JSON only.',
     prompt: `Create a marketing email draft for ReplyCraft.
 
 Audience summary: ${audienceSummary || 'General platform users'}
@@ -67,9 +67,13 @@ Campaign brief: ${brief}
 
 Return JSON with:
 {
-  "subject": "short subject line",
-  "preheader": "short inbox preview text",
-  "body": "plain text email body with paragraphs"
+  "status": "ready" or "needs_clarification",
+  "clarificationTitle": "short title only when more detail is needed",
+  "clarifyingQuestions": ["question 1", "question 2"],
+  "missingDetails": ["date", "time window"],
+  "subject": "short subject line when ready",
+  "preheader": "short inbox preview text when ready",
+  "body": "plain text email body with paragraphs when ready"
 }`,
     maxOutputTokens: 700,
     temperature: 0.55,
@@ -85,7 +89,7 @@ async function generateFinanceDraft({ brief, mode = 'renewal_reminder', audience
 
   const response = await googleAiService.generateText({
     systemInstruction:
-      'You are ReplyCraft finance AI. Draft calm, precise, non-threatening billing communication. Never promise refunds or plan changes unless explicitly stated. Return valid JSON only.',
+      'You are ReplyCraft finance AI. Draft calm, precise, non-threatening billing communication. Never promise refunds or plan changes unless explicitly stated. If the request is missing critical facts like plan name, billing date, amount, renewal window, grace period, currency, or action deadline, do not guess. Ask for clarification instead. Return valid JSON only.',
     prompt: `Create a finance communication draft for ReplyCraft.
 
 Mode: ${mode}
@@ -94,10 +98,14 @@ Brief: ${brief}
 
 Return JSON with:
 {
-  "subject": "short subject line",
-  "preheader": "preview text",
-  "body": "plain text email body with paragraphs",
-  "internalSummary": "one sentence for staff"
+  "status": "ready" or "needs_clarification",
+  "clarificationTitle": "short title only when more detail is needed",
+  "clarifyingQuestions": ["question 1", "question 2"],
+  "missingDetails": ["renewal date", "amount"],
+  "subject": "short subject line when ready",
+  "preheader": "preview text when ready",
+  "body": "plain text email body with paragraphs when ready",
+  "internalSummary": "one sentence for staff when ready"
 }`,
     maxOutputTokens: 700,
     temperature: 0.35,
@@ -125,7 +133,7 @@ async function generateSupportDraft(ticketId) {
 
   const response = await googleAiService.generateText({
     systemInstruction:
-      'You are ReplyCraft support AI. Help resolve tickets politely and clearly. You may draft replies, but you must never claim the ticket is closed or resolved by the customer unless they have confirmed satisfaction. Return valid JSON only.',
+      'You are ReplyCraft support AI. Help resolve tickets politely and clearly. You may draft replies, but you must never claim the ticket is closed or resolved by the customer unless they have confirmed satisfaction. If you do not have enough context to give a confident reply, ask for clarification instead of inventing actions or status details. Return valid JSON only.',
     prompt: `Draft a support response for this ticket.
 
 Ticket ID: ${ticket.ticketId}
@@ -142,10 +150,14 @@ ${notesSummary || 'No notes yet.'}
 
 Return JSON with:
 {
-  "replySubject": "short subject line",
-  "replyBody": "email body to customer in plain text",
-  "internalNote": "concise note for staff",
-  "recommendedStatus": "open or in-progress or resolved",
+  "status": "ready" or "needs_clarification",
+  "clarificationTitle": "short title only when more detail is needed",
+  "clarifyingQuestions": ["question 1", "question 2"],
+  "missingDetails": ["log details", "customer order id"],
+  "replySubject": "short subject line when ready",
+  "replyBody": "email body to customer in plain text when ready",
+  "internalNote": "concise note for staff when ready",
+  "recommendedStatus": "open or in-progress or resolved when ready",
   "requiresCustomerConfirmation": true,
   "resolutionChecklist": ["item 1", "item 2"]
 }`,
