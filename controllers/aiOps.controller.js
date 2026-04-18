@@ -43,6 +43,8 @@ const aiOpsController = {
         'blockDestructiveActions',
         'blockRoleChanges',
         'blockPlanChanges',
+        'googleEnabled',
+        'bedrockEnabled',
         'flashModel',
         'proModel',
         'reviewModel',

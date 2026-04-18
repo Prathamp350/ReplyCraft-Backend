@@ -12,6 +12,8 @@ const defaultAiOpsConfig = {
   blockDestructiveActions: true,
   blockRoleChanges: true,
   blockPlanChanges: true,
+  googleEnabled: true,
+  bedrockEnabled: false,
   flashModel: process.env.GOOGLE_AI_FLASH_MODEL || 'gemini-2.5-flash',
   proModel:
     process.env.GOOGLE_AI_PRO_MODEL ||

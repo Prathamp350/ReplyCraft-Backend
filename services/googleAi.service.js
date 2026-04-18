@@ -244,18 +244,38 @@ class MultiProviderAIService {
     const bedrockModel = runtimeConfig.bedrockModel || DEFAULT_BEDROCK_MODEL;
     const bulkProvider = runtimeConfig.bulkProvider || 'google';
     const finalProvider = runtimeConfig.finalProvider || 'bedrock';
+    const googleEnabled = runtimeConfig.googleEnabled !== false;
+    const bedrockEnabled = runtimeConfig.bedrockEnabled === true;
     const googleFallbackAvailable =
+      googleEnabled &&
       !!googleBackupModel &&
       googleBackupModel !== flashModel &&
       googleBackupModel !== proModel &&
       !String(googleBackupModel).startsWith('anthropic.');
 
-    const googleFastSequence = googleFallbackAvailable
-      ? ['google-flash', 'google-backup', 'bedrock']
-      : ['google-flash', 'bedrock'];
-    const googleDeepSequence = googleFallbackAvailable
-      ? ['google-deep', 'google-backup', 'google-flash', 'bedrock']
-      : ['google-deep', 'google-flash', 'bedrock'];
+    const googleFastSequenceBase = googleFallbackAvailable
+      ? ['google-flash', 'google-backup']
+      : ['google-flash'];
+    const googleDeepSequenceBase = googleFallbackAvailable
+      ? ['google-deep', 'google-backup', 'google-flash']
+      : ['google-deep', 'google-flash'];
+
+    const withBedrockFallback = (sequence) => {
+      const base = sequence.filter((provider) => {
+        if (provider.startsWith('google')) return googleEnabled;
+        if (provider === 'bedrock') return bedrockEnabled;
+        return true;
+      });
+
+      if (bedrockEnabled && !base.includes('bedrock')) {
+        base.push('bedrock');
+      }
+
+      return [...new Set(base)];
+    };
+
+    const googleFastSequence = withBedrockFallback(googleFastSequenceBase);
+    const googleDeepSequence = withBedrockFallback(googleDeepSequenceBase);
 
     const selectGoogleDeepModel = () => {
       if (taskType === 'review_reply' && reviewModel) {
@@ -273,7 +293,7 @@ class MultiProviderAIService {
     if (model) {
       if (String(model).startsWith('anthropic.')) {
         return {
-          providerSequence: ['bedrock', 'google-deep', 'google-flash'],
+          providerSequence: withBedrockFallback(['bedrock', 'google-deep', 'google-flash']),
           resolvedModel: model,
           taskType,
         };
@@ -288,8 +308,8 @@ class MultiProviderAIService {
 
     if (providerPreference === 'bedrock') {
       return {
-        providerSequence: ['bedrock', 'google-deep', 'google-flash'],
-        resolvedModel: bedrockModel,
+        providerSequence: withBedrockFallback(['bedrock', 'google-deep', 'google-flash']),
+        resolvedModel: bedrockEnabled ? bedrockModel : selectGoogleDeepModel(),
         taskType,
       };
     }
@@ -305,10 +325,11 @@ class MultiProviderAIService {
     if (quality === 'final' || taskType === 'final_output') {
       return {
         providerSequence:
-          finalProvider === 'google'
+          finalProvider === 'google' || !bedrockEnabled
             ? googleDeepSequence
-            : ['bedrock', 'google-deep', 'google-flash'],
-        resolvedModel: finalProvider === 'google' ? selectGoogleDeepModel() : finalModel,
+            : withBedrockFallback(['bedrock', 'google-deep', 'google-flash']),
+        resolvedModel:
+          finalProvider === 'google' || !bedrockEnabled ? selectGoogleDeepModel() : finalModel,
         taskType,
       };
     }
@@ -325,7 +346,7 @@ class MultiProviderAIService {
       return {
         providerSequence:
           bulkProvider === 'bedrock'
-            ? ['bedrock', 'google-flash', 'google-deep']
+            ? withBedrockFallback(['bedrock', 'google-flash', 'google-deep'])
             : googleFastSequence,
         resolvedModel: bulkProvider === 'bedrock' ? bedrockModel : flashModel,
         taskType,
@@ -599,6 +620,7 @@ class MultiProviderAIService {
     const now = Date.now();
 
     let bedrockStatus = {
+      enabled: runtimeConfig.bedrockEnabled === true,
       configured: hasBedrockCredentials(),
       sdkInstalled: !!(BedrockRuntimeClient && ConverseCommand),
       reachable: false,
@@ -607,23 +629,32 @@ class MultiProviderAIService {
       model: runtimeConfig.bedrockModel || runtimeConfig.finalModel || DEFAULT_BEDROCK_MODEL,
     };
 
-    try {
-      this.getBedrockClient();
-      bedrockStatus = {
-        ...bedrockStatus,
-        reachable: true,
-      };
-    } catch (error) {
+    if (runtimeConfig.bedrockEnabled === true) {
+      try {
+        this.getBedrockClient();
+        bedrockStatus = {
+          ...bedrockStatus,
+          reachable: true,
+        };
+      } catch (error) {
+        bedrockStatus = {
+          ...bedrockStatus,
+          reachable: false,
+          error: error.message,
+        };
+      }
+    } else {
       bedrockStatus = {
         ...bedrockStatus,
         reachable: false,
-        error: error.message,
+        error: 'Bedrock is disabled in AI Ops runtime controls.',
       };
     }
 
     return {
       runtimeConfig,
       google: {
+        enabled: runtimeConfig.googleEnabled !== false,
         totalKeys: this.googleKeyStates.length,
         activeKeys: this.googleKeyStates.filter((state) => !state.invalid && state.cooldownUntil <= now).length,
         keys: this.googleKeyStates.map((state) => ({
