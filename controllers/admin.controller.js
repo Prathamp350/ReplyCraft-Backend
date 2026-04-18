@@ -4,6 +4,8 @@ const ActiveSession = require('../models/ActiveSession');
 const BusinessConnection = require('../models/BusinessConnection');
 const Review = require('../models/Review');
 const Ticket = require('../models/Ticket');
+const AuditLog = require('../models/AuditLog');
+const AiExecutionLog = require('../models/AiExecutionLog');
 const logger = require('../utils/logger');
 const { getConfig, refreshConfig } = require('../services/configManager');
 const baseConfig = require('../config/config');
@@ -1231,6 +1233,232 @@ module.exports = {
     } catch (error) {
       logger.error('Admin god mode analytics error', { error: error.message, stack: error.stack });
       return res.status(500).json({ success: false, error: 'Failed to fetch God Mode analytics' });
+    }
+  },
+
+  getOpsAuditDashboard: async (_req, res) => {
+    try {
+      const now = new Date();
+      const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const [
+        auditSummaryRows,
+        suspiciousEvents,
+        latestAccessLogs,
+        aiSummaryRows,
+        aiProviderRows,
+        aiKeyRows,
+        latestAiLogs,
+      ] = await Promise.all([
+        AuditLog.aggregate([
+          { $match: { createdAt: { $gte: last7Days } } },
+          {
+            $group: {
+              _id: null,
+              totalEvents: { $sum: 1 },
+              suspiciousEvents: {
+                $sum: { $cond: ['$suspicious', 1, 0] },
+              },
+              failedLogins: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $eq: ['$eventType', 'login_failed'] },
+                        { $eq: ['$status', 'failed'] },
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              blockedEvents: {
+                $sum: {
+                  $cond: [{ $eq: ['$status', 'blocked'] }, 1, 0],
+                },
+              },
+              successfulLogins: {
+                $sum: {
+                  $cond: [
+                    {
+                      $and: [
+                        { $eq: ['$eventType', 'login_success'] },
+                        { $eq: ['$status', 'success'] },
+                      ],
+                    },
+                    1,
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+        ]),
+        AuditLog.find({ suspicious: true })
+          .sort({ createdAt: -1 })
+          .limit(15)
+          .select('email eventType status riskLevel reason loginMethod ipAddress createdAt metadata'),
+        AuditLog.find({})
+          .sort({ createdAt: -1 })
+          .limit(30)
+          .select('email eventType status riskLevel suspicious reason loginMethod ipAddress createdAt'),
+        AiExecutionLog.aggregate([
+          { $match: { createdAt: { $gte: last24Hours } } },
+          {
+            $group: {
+              _id: null,
+              totalRequests: { $sum: 1 },
+              failedRequests: {
+                $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] },
+              },
+              promptTokens: { $sum: '$promptTokens' },
+              completionTokens: { $sum: '$completionTokens' },
+              totalTokens: { $sum: '$totalTokens' },
+            },
+          },
+        ]),
+        AiExecutionLog.aggregate([
+          { $match: { createdAt: { $gte: last24Hours } } },
+          {
+            $group: {
+              _id: '$provider',
+              requests: { $sum: 1 },
+              failedRequests: {
+                $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] },
+              },
+              promptTokens: { $sum: '$promptTokens' },
+              completionTokens: { $sum: '$completionTokens' },
+              totalTokens: { $sum: '$totalTokens' },
+            },
+          },
+          { $project: { _id: 0, label: '$_id', requests: 1, failedRequests: 1, promptTokens: 1, completionTokens: 1, totalTokens: 1 } },
+          { $sort: { requests: -1 } },
+        ]),
+        AiExecutionLog.aggregate([
+          { $match: { createdAt: { $gte: last24Hours }, provider: 'google', keyIndex: { $ne: null } } },
+          {
+            $group: {
+              _id: '$keyIndex',
+              requests: { $sum: 1 },
+              failedRequests: {
+                $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] },
+              },
+              promptTokens: { $sum: '$promptTokens' },
+              completionTokens: { $sum: '$completionTokens' },
+              totalTokens: { $sum: '$totalTokens' },
+              lastSeenAt: { $max: '$createdAt' },
+              models: { $addToSet: '$model' },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              keyIndex: '$_id',
+              requests: 1,
+              failedRequests: 1,
+              promptTokens: 1,
+              completionTokens: 1,
+              totalTokens: 1,
+              lastSeenAt: 1,
+              models: 1,
+            },
+          },
+          { $sort: { keyIndex: 1 } },
+        ]),
+        AiExecutionLog.find({})
+          .sort({ createdAt: -1 })
+          .limit(30)
+          .select('taskType provider route model keyIndex status promptTokens completionTokens totalTokens durationMs error createdAt'),
+      ]);
+
+      const auditSummary = auditSummaryRows[0] || {
+        totalEvents: 0,
+        suspiciousEvents: 0,
+        failedLogins: 0,
+        blockedEvents: 0,
+        successfulLogins: 0,
+      };
+
+      const aiSummary = aiSummaryRows[0] || {
+        totalRequests: 0,
+        failedRequests: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+      };
+
+      return res.status(200).json({
+        success: true,
+        ops: {
+          security: {
+            summary: {
+              ...auditSummary,
+              window: '7d',
+            },
+            suspiciousLogins: suspiciousEvents.map((event) => ({
+              id: event._id,
+              email: event.email,
+              eventType: event.eventType,
+              status: event.status,
+              riskLevel: event.riskLevel,
+              loginMethod: event.loginMethod,
+              ipAddress: event.ipAddress,
+              reason: event.reason,
+              createdAt: event.createdAt,
+              createdLabel: formatRelativeTime(event.createdAt),
+              metadata: event.metadata || {},
+            })),
+            accessLogs: latestAccessLogs.map((event) => ({
+              id: event._id,
+              email: event.email,
+              eventType: event.eventType,
+              status: event.status,
+              riskLevel: event.riskLevel,
+              suspicious: !!event.suspicious,
+              loginMethod: event.loginMethod,
+              ipAddress: event.ipAddress,
+              reason: event.reason,
+              createdAt: event.createdAt,
+              createdLabel: formatRelativeTime(event.createdAt),
+            })),
+          },
+          ai: {
+            summary: {
+              ...aiSummary,
+              successRate: aiSummary.totalRequests
+                ? Number((((aiSummary.totalRequests - aiSummary.failedRequests) / aiSummary.totalRequests) * 100).toFixed(1))
+                : 0,
+              window: '24h',
+            },
+            byProvider: aiProviderRows,
+            byGoogleKey: aiKeyRows.map((row) => ({
+              ...row,
+              lastSeenLabel: row.lastSeenAt ? formatRelativeTime(row.lastSeenAt) : 'Never',
+            })),
+            logs: latestAiLogs.map((item) => ({
+              id: item._id,
+              taskType: item.taskType,
+              provider: item.provider,
+              route: item.route,
+              model: item.model,
+              keyIndex: item.keyIndex,
+              status: item.status,
+              promptTokens: item.promptTokens,
+              completionTokens: item.completionTokens,
+              totalTokens: item.totalTokens,
+              durationMs: item.durationMs,
+              error: item.error,
+              createdAt: item.createdAt,
+              createdLabel: formatRelativeTime(item.createdAt),
+            })),
+          },
+        },
+      });
+    } catch (error) {
+      logger.error('Admin ops audit dashboard error', { error: error.message, stack: error.stack });
+      return res.status(500).json({ success: false, error: 'Failed to fetch operations dashboard' });
     }
   },
 

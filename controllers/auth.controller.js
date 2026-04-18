@@ -5,6 +5,12 @@ const logger = require('../utils/logger');
 const { queueWelcomeEmail, queueOtpEmail } = require('../queues/email.queue');
 const { OAuth2Client } = require('google-auth-library');
 const { validatePassword } = require('../utils/validators');
+const {
+  logAccessEvent,
+  detectSuspiciousLogin,
+  getRequestIp,
+  getUserAgent,
+} = require('../services/auditLog.service');
 
 const googleClient = new OAuth2Client(process.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID);
 
@@ -28,6 +34,16 @@ const googleLogin = async (req, res) => {
     const { idToken } = req.body;
 
     if (!idToken) {
+      await logAccessEvent({
+        req,
+        email: null,
+        eventType: 'google_login_failed',
+        status: 'failed',
+        riskLevel: 'low',
+        suspicious: false,
+        loginMethod: 'google',
+        reason: 'Missing Google ID token',
+      });
       return res.status(400).json({
         success: false,
         error: 'Google ID token is required'
@@ -95,6 +111,26 @@ const googleLogin = async (req, res) => {
       logger.logAuth('Google user logged in', { userId: user._id, googleId });
     }
 
+    const suspiciousLogin = detectSuspiciousLogin(user, req);
+    user.lastLoginAt = new Date();
+    user.lastLoginIp = getRequestIp(req);
+    user.lastLoginUserAgent = getUserAgent(req);
+    user.lastLoginMethod = 'google';
+    await user.save();
+
+    await logAccessEvent({
+      req,
+      user,
+      email: user.email,
+      eventType: 'google_login_success',
+      status: 'success',
+      riskLevel: suspiciousLogin.riskLevel,
+      suspicious: suspiciousLogin.suspicious,
+      loginMethod: 'google',
+      reason: suspiciousLogin.reason,
+      metadata: suspiciousLogin.metadata,
+    });
+
     // Generate JWT token for backend
     const jwtConfig = getJwtConfig();
     const token = jwt.sign(
@@ -122,6 +158,16 @@ const googleLogin = async (req, res) => {
 
   } catch (error) {
     logger.error('Google Login Error', { error: error.message, stack: error.stack });
+    await logAccessEvent({
+      req,
+      email: req.body?.email || null,
+      eventType: 'google_login_failed',
+      status: 'failed',
+      riskLevel: 'medium',
+      suspicious: true,
+      loginMethod: 'google',
+      reason: error.message,
+    });
     return res.status(500).json({
       success: false,
       error: 'Failed to login with Google'
@@ -253,6 +299,16 @@ const login = async (req, res) => {
     
     if (!user) {
       logger.logAuth('Login failed - user not found', { email: email.toLowerCase() });
+      await logAccessEvent({
+        req,
+        email: email.toLowerCase(),
+        eventType: 'login_failed',
+        status: 'failed',
+        riskLevel: 'medium',
+        suspicious: true,
+        loginMethod: 'password',
+        reason: 'User not found',
+      });
       return res.status(401).json({
         success: false,
         error: 'Invalid email or password'
@@ -261,6 +317,17 @@ const login = async (req, res) => {
 
     // Check if account is locked
     if (user.lockUntil && user.lockUntil > new Date()) {
+      await logAccessEvent({
+        req,
+        user,
+        email: user.email,
+        eventType: 'login_blocked',
+        status: 'blocked',
+        riskLevel: 'high',
+        suspicious: true,
+        loginMethod: 'password',
+        reason: 'Account is currently locked',
+      });
       return res.status(403).json({
         success: false,
         error: 'Account locked due to too many failed attempts. Please reset your password.',
@@ -271,6 +338,17 @@ const login = async (req, res) => {
     // Check if user is active
     if (!user.isActive) {
       logger.logAuth('Login failed - account deactivated', { userId: user._id });
+      await logAccessEvent({
+        req,
+        user,
+        email: user.email,
+        eventType: 'login_blocked',
+        status: 'blocked',
+        riskLevel: 'medium',
+        suspicious: true,
+        loginMethod: 'password',
+        reason: 'Account is deactivated',
+      });
       return res.status(403).json({
         success: false,
         error: 'Account is deactivated'
@@ -300,6 +378,20 @@ const login = async (req, res) => {
         await user.save();
         
         logger.logAuth('Account locked (3 failed attempts)', { userId: user._id });
+        await logAccessEvent({
+          req,
+          user,
+          email: user.email,
+          eventType: 'account_locked',
+          status: 'blocked',
+          riskLevel: 'high',
+          suspicious: true,
+          loginMethod: 'password',
+          reason: 'Too many failed login attempts',
+          metadata: {
+            failedLoginAttempts: user.failedLoginAttempts,
+          },
+        });
         return res.status(403).json({
           success: false,
           error: 'Account locked due to too many failed attempts. Please reset your password.',
@@ -309,6 +401,20 @@ const login = async (req, res) => {
       
       await user.save();
       logger.logAuth('Login failed - invalid password', { userId: user._id });
+      await logAccessEvent({
+        req,
+        user,
+        email: user.email,
+        eventType: 'login_failed',
+        status: 'failed',
+        riskLevel: user.failedLoginAttempts >= 2 ? 'medium' : 'low',
+        suspicious: user.failedLoginAttempts >= 2,
+        loginMethod: 'password',
+        reason: 'Invalid password',
+        metadata: {
+          failedLoginAttempts: user.failedLoginAttempts,
+        },
+      });
       return res.status(401).json({
         success: false,
         error: `Invalid email or password. ${3 - user.failedLoginAttempts} attempts remaining.`
@@ -328,6 +434,17 @@ const login = async (req, res) => {
     await user.save();
 
     logger.logAuth('User initiated login, OTP sent', { userId: user._id, email: user.email });
+    await logAccessEvent({
+      req,
+      user,
+      email: user.email,
+      eventType: 'otp_sent',
+      status: 'success',
+      riskLevel: 'low',
+      suspicious: false,
+      loginMethod: 'password',
+      reason: 'Password login passed and OTP was sent',
+    });
 
     // Queue OTP email
     queueOtpEmail(user.email, user.name, otp, { ip: req.ip, userAgent: req.headers['user-agent'] }).catch(err => {
@@ -342,6 +459,16 @@ const login = async (req, res) => {
 
   } catch (error) {
     logger.error('Login Error', { error: error.message, stack: error.stack });
+    await logAccessEvent({
+      req,
+      email: req.body?.email || null,
+      eventType: 'login_error',
+      status: 'failed',
+      riskLevel: 'medium',
+      suspicious: true,
+      loginMethod: 'password',
+      reason: error.message,
+    });
     return res.status(500).json({
       success: false,
       error: 'Failed to login'
@@ -387,7 +514,25 @@ const verifyOtp = async (req, res) => {
 
     // Check and reset daily usage if needed
     user.checkMonthlyLimit();
+    const suspiciousLogin = detectSuspiciousLogin(user, req);
+    user.lastLoginAt = new Date();
+    user.lastLoginIp = getRequestIp(req);
+    user.lastLoginUserAgent = getUserAgent(req);
+    user.lastLoginMethod = 'otp';
     await user.save();
+
+    await logAccessEvent({
+      req,
+      user,
+      email: user.email,
+      eventType: 'login_success',
+      status: 'success',
+      riskLevel: suspiciousLogin.riskLevel,
+      suspicious: suspiciousLogin.suspicious,
+      loginMethod: 'otp',
+      reason: suspiciousLogin.reason || 'OTP verified successfully',
+      metadata: suspiciousLogin.metadata,
+    });
 
     if (newlyVerified && isNewAccount) {
       // Queue welcome email asynchronously
@@ -423,6 +568,16 @@ const verifyOtp = async (req, res) => {
     });
   } catch (error) {
     logger.error('Verify OTP Error', { error: error.message, stack: error.stack });
+    await logAccessEvent({
+      req,
+      email: req.body?.email || null,
+      eventType: 'otp_verify_failed',
+      status: 'failed',
+      riskLevel: 'medium',
+      suspicious: true,
+      loginMethod: 'otp',
+      reason: error.message,
+    });
     return res.status(500).json({ success: false, error: 'Failed to verify OTP' });
   }
 };

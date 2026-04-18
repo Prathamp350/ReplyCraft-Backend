@@ -214,6 +214,23 @@ const userSchema = new mongoose.Schema({
   lockUntil: {
     type: Date,
     default: null
+  },
+  lastLoginAt: {
+    type: Date,
+    default: null
+  },
+  lastLoginIp: {
+    type: String,
+    default: null
+  },
+  lastLoginUserAgent: {
+    type: String,
+    default: ''
+  },
+  lastLoginMethod: {
+    type: String,
+    enum: [null, 'password', 'google', 'otp'],
+    default: null
   }
 }, {
   timestamps: true

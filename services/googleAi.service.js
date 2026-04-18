@@ -1,6 +1,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const { getAiRuntimeConfig } = require('./aiRuntimeConfig.service');
+const AiExecutionLog = require('../models/AiExecutionLog');
 
 let BedrockRuntimeClient;
 let ConverseCommand;
@@ -221,6 +222,15 @@ class MultiProviderAIService {
     return text;
   }
 
+  extractGoogleUsage(responseData) {
+    const usage = responseData?.usageMetadata || {};
+    return {
+      promptTokens: usage.promptTokenCount || 0,
+      completionTokens: usage.candidatesTokenCount || 0,
+      totalTokens: usage.totalTokenCount || 0,
+    };
+  }
+
   extractBedrockText(responseData) {
     const parts = responseData?.output?.message?.content || [];
     const text = parts
@@ -233,6 +243,25 @@ class MultiProviderAIService {
     }
 
     return text;
+  }
+
+  extractBedrockUsage(responseData) {
+    const usage = responseData?.usage || {};
+    const promptTokens = usage.inputTokens || 0;
+    const completionTokens = usage.outputTokens || 0;
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens: usage.totalTokens || promptTokens + completionTokens,
+    };
+  }
+
+  async persistExecutionLog(entry) {
+    try {
+      await AiExecutionLog.create(entry);
+    } catch (error) {
+      logger.error('Failed to persist AI execution log', { error: error.message, provider: entry.provider });
+    }
   }
 
   getBedrockClient() {
@@ -424,6 +453,7 @@ class MultiProviderAIService {
         break;
       }
 
+      const startedAt = Date.now();
       try {
         const response = await axios.post(
           `${GOOGLE_AI_BASE_URL}/models/${model}:generateContent`,
@@ -461,6 +491,8 @@ class MultiProviderAIService {
           provider: 'google',
           model,
           keyIndex: state.index + 1,
+          usage: this.extractGoogleUsage(response.data),
+          durationMs: Date.now() - startedAt,
         };
       } catch (error) {
         attempts.push({
@@ -497,6 +529,7 @@ class MultiProviderAIService {
     }
 
     try {
+      const startedAt = Date.now();
       const client = this.getBedrockClient();
       const response = await client.send(
         new ConverseCommand({
@@ -522,6 +555,8 @@ class MultiProviderAIService {
         text: this.extractBedrockText(response),
         provider: 'bedrock',
         model: model || DEFAULT_BEDROCK_MODEL,
+        usage: this.extractBedrockUsage(response),
+        durationMs: Date.now() - startedAt,
       };
     } catch (error) {
       this.bedrockState.failureCount += 1;
@@ -590,6 +625,20 @@ class MultiProviderAIService {
             maxOutputTokens,
           });
           this.recordExecution({ taskType, route, provider: result.provider, model: result.model, success: true });
+          await this.persistExecutionLog({
+            taskType,
+            provider: result.provider,
+            route,
+            model: result.model,
+            keyIndex: result.keyIndex || null,
+            status: 'success',
+            promptTokens: result.usage?.promptTokens || 0,
+            completionTokens: result.usage?.completionTokens || 0,
+            totalTokens: result.usage?.totalTokens || 0,
+            durationMs: result.durationMs || 0,
+            temperature,
+            maxOutputTokens,
+          });
           return result;
         }
 
@@ -613,6 +662,20 @@ class MultiProviderAIService {
             maxOutputTokens,
           });
           this.recordExecution({ taskType, route, provider: result.provider, model: result.model, success: true });
+          await this.persistExecutionLog({
+            taskType,
+            provider: result.provider,
+            route,
+            model: result.model,
+            keyIndex: result.keyIndex || null,
+            status: 'success',
+            promptTokens: result.usage?.promptTokens || 0,
+            completionTokens: result.usage?.completionTokens || 0,
+            totalTokens: result.usage?.totalTokens || 0,
+            durationMs: result.durationMs || 0,
+            temperature,
+            maxOutputTokens,
+          });
           return result;
         }
 
@@ -631,6 +694,20 @@ class MultiProviderAIService {
             maxOutputTokens,
           });
           this.recordExecution({ taskType, route, provider: result.provider, model: result.model, success: true });
+          await this.persistExecutionLog({
+            taskType,
+            provider: result.provider,
+            route,
+            model: result.model,
+            keyIndex: result.keyIndex || null,
+            status: 'success',
+            promptTokens: result.usage?.promptTokens || 0,
+            completionTokens: result.usage?.completionTokens || 0,
+            totalTokens: result.usage?.totalTokens || 0,
+            durationMs: result.durationMs || 0,
+            temperature,
+            maxOutputTokens,
+          });
           return result;
         }
 
@@ -646,6 +723,20 @@ class MultiProviderAIService {
             maxOutputTokens,
           });
           this.recordExecution({ taskType, route, provider: result.provider, model: result.model, success: true });
+          await this.persistExecutionLog({
+            taskType,
+            provider: result.provider,
+            route,
+            model: result.model,
+            keyIndex: null,
+            status: 'success',
+            promptTokens: result.usage?.promptTokens || 0,
+            completionTokens: result.usage?.completionTokens || 0,
+            totalTokens: result.usage?.totalTokens || 0,
+            durationMs: result.durationMs || 0,
+            temperature,
+            maxOutputTokens,
+          });
           return result;
         }
       } catch (error) {
@@ -655,6 +746,25 @@ class MultiProviderAIService {
           attempts: error.attempts || [],
         });
         this.recordExecution({ taskType, route, provider: route.startsWith('google') ? 'google' : 'bedrock', model: routing.resolvedModel, success: false, error: error.message });
+        const firstAttempt = error.attempts?.[0];
+        await this.persistExecutionLog({
+          taskType,
+          provider: route.startsWith('google') ? 'google' : 'bedrock',
+          route,
+          model: routing.resolvedModel,
+          keyIndex: firstAttempt?.keyIndex || null,
+          status: 'failed',
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          durationMs: 0,
+          temperature,
+          maxOutputTokens,
+          error: error.message,
+          metadata: {
+            attempts: error.attempts || [],
+          },
+        });
       }
     }
 
