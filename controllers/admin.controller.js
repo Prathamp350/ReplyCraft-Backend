@@ -160,6 +160,68 @@ const parseManualEmails = (value) =>
 
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
+const STAFF_SIDEBAR_PRESETS = ['midnight', 'ocean', 'emerald', 'royal'];
+
+const getOrCreateSystemConfig = async () => {
+  let configDoc = await SystemConfig.findOne({ configId: 'global' });
+  if (!configDoc) {
+    configDoc = await SystemConfig.create({ configId: 'global' });
+  }
+  return configDoc;
+};
+
+const getStaffUiConfig = async (req, res) => {
+  try {
+    const configDoc = await getOrCreateSystemConfig();
+    return res.status(200).json({
+      success: true,
+      staffUi: {
+        sidebarPreset: configDoc.staffUi?.sidebarPreset || 'midnight',
+        updatedAt: configDoc.staffUi?.updatedAt || null,
+        availablePresets: STAFF_SIDEBAR_PRESETS,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to fetch staff UI config', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to fetch staff UI config' });
+  }
+};
+
+const updateStaffUiConfig = async (req, res) => {
+  try {
+    const { sidebarPreset } = req.body || {};
+
+    if (!STAFF_SIDEBAR_PRESETS.includes(String(sidebarPreset || ''))) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid sidebar preset. Must be one of: ${STAFF_SIDEBAR_PRESETS.join(', ')}`,
+      });
+    }
+
+    const configDoc = await getOrCreateSystemConfig();
+    configDoc.staffUi = {
+      ...(configDoc.staffUi || {}),
+      sidebarPreset,
+      updatedAt: new Date(),
+    };
+    configDoc.updatedBy = req.userId;
+    configDoc.markModified('staffUi');
+    await configDoc.save();
+
+    return res.status(200).json({
+      success: true,
+      staffUi: {
+        sidebarPreset: configDoc.staffUi.sidebarPreset,
+        updatedAt: configDoc.staffUi.updatedAt,
+        availablePresets: STAFF_SIDEBAR_PRESETS,
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to update staff UI config', { error: error.message });
+    return res.status(500).json({ success: false, error: 'Failed to update staff UI config' });
+  }
+};
+
 /**
  * Create a new staff account
  * Superadmin can create: admin, finance, support, superadmin
@@ -299,6 +361,8 @@ module.exports = {
   createStaff,
   listStaff,
   deleteStaff,
+  getStaffUiConfig,
+  updateStaffUiConfig,
 
   // --- Promo Codes ---
   createPromo: async (req, res) => {

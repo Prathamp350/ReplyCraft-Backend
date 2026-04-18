@@ -50,6 +50,17 @@ const systemConfigSchema = new mongoose.Schema({
     finalProvider: { type: String, default: process.env.AI_FINAL_PROVIDER || 'bedrock' },
     lastUpdatedAt: { type: Date, default: null }
   },
+  staffUi: {
+    sidebarPreset: {
+      type: String,
+      enum: ['midnight', 'ocean', 'emerald', 'royal'],
+      default: 'midnight'
+    },
+    updatedAt: {
+      type: Date,
+      default: null
+    }
+  },
   updatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -92,6 +103,12 @@ systemConfigSchema.pre('save', function(next) {
       bulkProvider: process.env.AI_BULK_PROVIDER || 'google',
       finalProvider: process.env.AI_FINAL_PROVIDER || 'bedrock',
       lastUpdatedAt: null
+    };
+  }
+  if (!this.staffUi) {
+    this.staffUi = {
+      sidebarPreset: 'midnight',
+      updatedAt: null,
     };
   }
   next();
