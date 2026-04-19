@@ -12,6 +12,7 @@ const baseConfig = require('../config/config');
 const SystemConfig = require('../models/SystemConfig');
 const PromoCode = require('../models/PromoCode');
 const { queueMarketingBroadcastEmail } = require('../queues/email.queue');
+const { logAccessEvent } = require('../services/auditLog.service');
 
 const churnStatuses = ['canceled', 'expired', 'past_due', 'unpaid'];
 
@@ -109,6 +110,12 @@ const formatRelativeTime = (date) => {
   if (diffSeconds < 86400) return `${Math.floor(diffSeconds / 3600)}h ago`;
   return `${Math.floor(diffSeconds / 86400)}d ago`;
 };
+
+const formatEventLabel = (value = '') =>
+  String(value)
+    .split('_')
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
 
 const buildUserLookupMatch = (query = {}) => {
   const match = { 'user.role': 'user' };
@@ -208,6 +215,15 @@ const updateStaffUiConfig = async (req, res) => {
     configDoc.markModified('staffUi');
     await configDoc.save();
 
+    await logAccessEvent({
+      req,
+      user: req.user,
+      eventType: 'staff_ui_updated',
+      loginMethod: 'system',
+      reason: `Updated staff sidebar preset to ${sidebarPreset}`,
+      metadata: { sidebarPreset },
+    });
+
     return res.status(200).json({
       success: true,
       staffUi: {
@@ -274,6 +290,19 @@ const createStaff = async (req, res) => {
 
     await user.save();
     logger.logAuth(`Staff account created by ${req.user.email}`, { newUserId: user._id, role: user.role });
+
+    await logAccessEvent({
+      req,
+      user: req.user,
+      eventType: 'staff_created',
+      loginMethod: 'system',
+      reason: `Created ${user.role} staff account`,
+      metadata: {
+        targetUserId: user._id,
+        targetEmail: user.email,
+        targetRole: user.role,
+      },
+    });
 
     return res.status(201).json({
       success: true,
@@ -347,6 +376,19 @@ const deleteStaff = async (req, res) => {
 
     logger.logAuth(`Staff account deactivated by ${req.user.email}`, { staffId: staffUser._id, role: staffUser.role });
 
+    await logAccessEvent({
+      req,
+      user: req.user,
+      eventType: 'staff_deactivated',
+      loginMethod: 'system',
+      reason: `Deactivated ${staffUser.role} staff account`,
+      metadata: {
+        targetUserId: staffUser._id,
+        targetEmail: staffUser.email,
+        targetRole: staffUser.role,
+      },
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Staff account deactivated'
@@ -372,6 +414,20 @@ module.exports = {
         code, discountPercent, applicablePlan, maxUses, validUntil, createdBy: req.userId
       });
       await promo.save();
+
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'promo_created',
+        loginMethod: 'system',
+        reason: `Created promo code ${promo.code}`,
+        metadata: {
+          promoId: promo._id,
+          code: promo.code,
+          applicablePlan: promo.applicablePlan,
+        },
+      });
+
       return res.status(201).json({ success: true, promo });
     } catch (error) {
       if (error.code === 11000) return res.status(400).json({ success: false, error: 'Promo code already exists' });
@@ -390,7 +446,20 @@ module.exports = {
 
   deletePromo: async (req, res) => {
     try {
-      await PromoCode.findByIdAndDelete(req.params.id);
+      const promo = await PromoCode.findByIdAndDelete(req.params.id);
+
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'promo_deleted',
+        loginMethod: 'system',
+        reason: promo ? `Deleted promo code ${promo.code}` : 'Deleted promo code',
+        metadata: {
+          promoId: req.params.id,
+          code: promo?.code || null,
+        },
+      });
+
       return res.status(200).json({ success: true });
     } catch (error) {
       return res.status(500).json({ success: false, error: 'Failed to delete promo' });
@@ -421,6 +490,18 @@ module.exports = {
 
       // IMPORTANT: refresh cache instantly across backend
       await refreshConfig();
+
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'plan_updated',
+        loginMethod: 'system',
+        reason: `Updated plan ${planId}`,
+        metadata: {
+          planId,
+          updatedFields: Object.keys(updates || {}),
+        },
+      });
 
       return res.status(200).json({ success: true, plan: configDoc.plans[planId] });
     } catch (error) {
@@ -589,6 +670,18 @@ module.exports = {
         queuedBy: req.user?.email,
         recipientCount: recipients.length,
         subject: trimmedSubject,
+      });
+
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'marketing_broadcast_sent',
+        loginMethod: 'system',
+        reason: `Queued marketing broadcast to ${recipients.length} recipients`,
+        metadata: {
+          subject: trimmedSubject,
+          recipients: recipients.length,
+        },
       });
 
       return res.status(200).json({
@@ -847,11 +940,11 @@ module.exports = {
           .limit(25)
           .select('sessionId userId userName userEmail plan subscriptionStatus businessName pagePath country countryCode state city timezone deviceType eventType lastSeenAt'),
         ActiveSession.countDocuments(activeFilter),
-        TrackingEvent.countDocuments(eventFilter),
-        TrackingEvent.find(eventFilter)
+        AuditLog.countDocuments(eventFilter),
+        AuditLog.find(eventFilter)
           .sort({ createdAt: -1 })
           .limit(20)
-          .select('eventType pagePath sessionId userId metadata createdAt'),
+          .select('email eventType status riskLevel suspicious reason metadata createdAt'),
         ActiveSession.aggregate([
           { $match: activeFilter },
           {
@@ -1146,9 +1239,9 @@ module.exports = {
           .select('ticketId subject status priority createdAt name email'),
       ]);
 
-      const totalTrackedUsers = await TrackingEvent.distinct('userId', { userId: { $ne: null } }).then((ids) => ids.length);
+      const totalTrackedUsers = await AuditLog.distinct('userId', { userId: { $ne: null } }).then((ids) => ids.length);
 
-      const eventsByType = await TrackingEvent.aggregate([
+      const eventsByType = await AuditLog.aggregate([
         { $match: eventFilter },
         { $group: { _id: '$eventType', count: { $sum: 1 } } },
         {
@@ -1164,16 +1257,16 @@ module.exports = {
       const mergedFeed = [
         ...recentEvents.map((event) => ({
           id: `event_${event._id}`,
-          kind: 'tracking',
+          kind: 'access',
           eventType: event.eventType,
           label: formatRelativeTime(event.createdAt),
-          title: event.eventType,
-          pagePath: event.pagePath,
-          country: event.metadata?.country || 'Unknown',
+          title: formatEventLabel(event.eventType),
+          pagePath: event.reason || event.email || event.eventType,
+          country: event.metadata?.country || 'System',
           state: event.metadata?.state || null,
           city: event.metadata?.city || null,
           timezone: event.metadata?.timezone || null,
-          deviceType: event.metadata?.deviceType || null,
+          deviceType: event.metadata?.deviceType || event.status || null,
           createdAt: event.createdAt,
         })),
         ...recentNegativeReviews.map((review) => ({
@@ -1559,6 +1652,19 @@ module.exports = {
 
       await user.save();
 
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'user_plan_updated',
+        loginMethod: 'system',
+        reason: `Changed user plan to ${plan}`,
+        metadata: {
+          targetUserId: user._id,
+          targetEmail: user.email,
+          plan,
+        },
+      });
+
       return res.status(200).json({
         success: true,
         message: 'User plan updated successfully',
@@ -1584,6 +1690,18 @@ module.exports = {
       }
 
       await User.findByIdAndDelete(id);
+
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'user_deleted',
+        loginMethod: 'system',
+        reason: 'Deleted platform user',
+        metadata: {
+          targetUserId: user._id,
+          targetEmail: user.email,
+        },
+      });
 
       return res.status(200).json({
         success: true,

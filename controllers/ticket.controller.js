@@ -1,6 +1,7 @@
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
 const logger = require('../utils/logger');
+const { logAccessEvent } = require('../services/auditLog.service');
 
 /**
  * Get tickets (paginated, filterable) — staff only
@@ -126,6 +127,18 @@ const updateTicketStatus = async (req, res) => {
 
     logger.info('Ticket status updated', { ticketId: ticket.ticketId, status, by: req.user.email });
 
+    await logAccessEvent({
+      req,
+      user: req.user,
+      eventType: 'ticket_status_updated',
+      loginMethod: 'system',
+      reason: `Updated ticket ${ticket.ticketId} to ${status}`,
+      metadata: {
+        ticketId: ticket.ticketId,
+        status,
+      },
+    });
+
     return res.status(200).json({ success: true, ticket });
   } catch (error) {
     logger.error('Update Ticket Status Error', { error: error.message });
@@ -156,6 +169,17 @@ const addNote = async (req, res) => {
     await ticket.save();
 
     logger.info('Note added to ticket', { ticketId: ticket.ticketId, by: req.user.email });
+
+    await logAccessEvent({
+      req,
+      user: req.user,
+      eventType: 'ticket_note_added',
+      loginMethod: 'system',
+      reason: `Added note to ticket ${ticket.ticketId}`,
+      metadata: {
+        ticketId: ticket.ticketId,
+      },
+    });
 
     return res.status(200).json({ success: true, ticket });
   } catch (error) {
@@ -192,6 +216,18 @@ const assignTicket = async (req, res) => {
     await ticket.save();
 
     logger.info('Ticket assigned', { ticketId: ticket.ticketId, assignedTo: staffId, by: req.user.email });
+
+    await logAccessEvent({
+      req,
+      user: req.user,
+      eventType: 'ticket_assigned',
+      loginMethod: 'system',
+      reason: staffId ? `Assigned ticket ${ticket.ticketId}` : `Unassigned ticket ${ticket.ticketId}`,
+      metadata: {
+        ticketId: ticket.ticketId,
+        assignedTo: staffId || null,
+      },
+    });
 
     return res.status(200).json({ success: true, ticket });
   } catch (error) {

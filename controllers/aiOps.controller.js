@@ -11,6 +11,7 @@ const {
 } = require('../services/aiOps.service');
 const googleAiService = require('../services/googleAi.service');
 const { queueSupportAiReplyEmail } = require('../queues/email.queue');
+const { logAccessEvent } = require('../services/auditLog.service');
 
 const safeSupportStatus = (value) => {
   if (value === 'resolved') return 'resolved';
@@ -58,6 +59,16 @@ const aiOpsController = {
         Object.entries(req.body || {}).filter(([key]) => allowed.includes(key))
       );
       const config = await updateAiOpsConfig(patch, req.user?._id);
+
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'ai_ops_config_updated',
+        loginMethod: 'system',
+        reason: 'Updated AI Ops runtime configuration',
+        metadata: { updatedFields: Object.keys(patch || {}) },
+      });
+
       return res.status(200).json({ success: true, config });
     } catch (error) {
       logger.error('Failed to update AI ops config', { error: error.message });
@@ -91,6 +102,16 @@ const aiOpsController = {
 
       const updated = await updateAiOpsConfig({ googleKeyOverrides: nextOverrides }, req.user?._id);
       const health = await googleAiService.getHealthSnapshot();
+
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'ai_provider_key_toggled',
+        loginMethod: 'system',
+        reason: `${enabled ? 'Enabled' : 'Disabled'} Gemini key ${keyIndex}`,
+        metadata: { keyIndex, enabled },
+      });
+
       return res.status(200).json({ success: true, config: updated, health });
     } catch (error) {
       logger.error('Failed to update Google key state', { error: error.message });
@@ -107,6 +128,16 @@ const aiOpsController = {
 
       googleAiService.resetGoogleKeyStates(keyIndex);
       const health = await googleAiService.getHealthSnapshot();
+
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'ai_provider_keys_refreshed',
+        loginMethod: 'system',
+        reason: keyIndex ? `Refreshed Gemini key ${keyIndex}` : 'Refreshed Gemini key states',
+        metadata: { keyIndex },
+      });
+
       return res.status(200).json({
         success: true,
         message: keyIndex
@@ -206,6 +237,18 @@ const aiOpsController = {
       });
       await ticket.save();
 
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: 'support_ai_reply_sent',
+        loginMethod: 'system',
+        reason: `Sent AI support reply for ${ticket.ticketId}`,
+        metadata: {
+          ticketId: ticket.ticketId,
+          recommendedStatus: ticket.status,
+        },
+      });
+
       return res.status(200).json({
         success: true,
         message: `AI support reply queued for ${ticket.ticketId}. The ticket stays open until customer satisfaction is confirmed.`,
@@ -241,6 +284,20 @@ const aiOpsController = {
           : 'Customer has not confirmed satisfaction yet. Keeping ticket open for follow-up.',
       });
       await ticket.save();
+
+      await logAccessEvent({
+        req,
+        user: req.user,
+        eventType: satisfied ? 'support_ticket_closed' : 'support_ticket_reopened',
+        loginMethod: 'system',
+        reason: satisfied
+          ? `Confirmed satisfaction for ${ticket.ticketId}`
+          : `Kept ${ticket.ticketId} open for follow-up`,
+        metadata: {
+          ticketId: ticket.ticketId,
+          satisfied: !!satisfied,
+        },
+      });
 
       return res.status(200).json({ success: true, ticket });
     } catch (error) {
