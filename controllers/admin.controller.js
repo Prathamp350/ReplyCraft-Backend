@@ -184,6 +184,7 @@ const getStaffUiConfig = async (req, res) => {
       success: true,
       staffUi: {
         sidebarPreset: configDoc.staffUi?.sidebarPreset || 'midnight',
+        logsEnabled: configDoc.staffUi?.logsEnabled !== false,
         updatedAt: configDoc.staffUi?.updatedAt || null,
         availablePresets: STAFF_SIDEBAR_PRESETS,
       },
@@ -196,19 +197,41 @@ const getStaffUiConfig = async (req, res) => {
 
 const updateStaffUiConfig = async (req, res) => {
   try {
-    const { sidebarPreset } = req.body || {};
+    const { sidebarPreset, logsEnabled } = req.body || {};
 
-    if (!STAFF_SIDEBAR_PRESETS.includes(String(sidebarPreset || ''))) {
+    if (sidebarPreset !== undefined && !STAFF_SIDEBAR_PRESETS.includes(String(sidebarPreset || ''))) {
       return res.status(400).json({
         success: false,
         error: `Invalid sidebar preset. Must be one of: ${STAFF_SIDEBAR_PRESETS.join(', ')}`,
       });
     }
 
+    if (logsEnabled !== undefined && typeof logsEnabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: 'logsEnabled must be a boolean value',
+      });
+    }
+
+    if (logsEnabled !== undefined && req.user?.role !== 'superadmin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only superadmin can update log visibility',
+      });
+    }
+
+    if (sidebarPreset === undefined && logsEnabled === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'No staff UI changes were provided',
+      });
+    }
+
     const configDoc = await getOrCreateSystemConfig();
     configDoc.staffUi = {
       ...(configDoc.staffUi || {}),
-      sidebarPreset,
+      ...(sidebarPreset !== undefined ? { sidebarPreset } : {}),
+      ...(logsEnabled !== undefined ? { logsEnabled } : {}),
       updatedAt: new Date(),
     };
     configDoc.updatedBy = req.userId;
@@ -220,14 +243,18 @@ const updateStaffUiConfig = async (req, res) => {
       user: req.user,
       eventType: 'staff_ui_updated',
       loginMethod: 'system',
-      reason: `Updated staff sidebar preset to ${sidebarPreset}`,
-      metadata: { sidebarPreset },
+      reason: 'Updated staff admin UI controls',
+      metadata: {
+        ...(sidebarPreset !== undefined ? { sidebarPreset } : {}),
+        ...(logsEnabled !== undefined ? { logsEnabled } : {}),
+      },
     });
 
     return res.status(200).json({
       success: true,
       staffUi: {
-        sidebarPreset: configDoc.staffUi.sidebarPreset,
+        sidebarPreset: configDoc.staffUi.sidebarPreset || 'midnight',
+        logsEnabled: configDoc.staffUi.logsEnabled !== false,
         updatedAt: configDoc.staffUi.updatedAt,
         availablePresets: STAFF_SIDEBAR_PRESETS,
       },
