@@ -743,6 +743,7 @@ module.exports = {
 
       const eventFilter = {
         createdAt: { $gte: recentEventsSince },
+        eventType: { $ne: 'heartbeat' },
       };
 
       if (req.query.country && req.query.country !== 'all') {

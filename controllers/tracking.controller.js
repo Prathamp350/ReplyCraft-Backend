@@ -1,6 +1,7 @@
 const TrackingEvent = require('../models/TrackingEvent');
 const ActiveSession = require('../models/ActiveSession');
 const logger = require('../utils/logger');
+const HEARTBEAT_SESSION_REFRESH_MS = 2 * 60 * 1000;
 
 const countryNames = typeof Intl.DisplayNames === 'function'
   ? new Intl.DisplayNames(['en'], { type: 'region' })
@@ -86,8 +87,10 @@ const trackEvent = async (req, res) => {
     }
 
     const analyticsConsent = Boolean(consent?.analytics);
+    const normalizedEventType = String(eventType).trim().toLowerCase();
+    const isHeartbeat = normalizedEventType === 'heartbeat';
 
-    if (!analyticsConsent && eventType !== 'consent_updated') {
+    if (!analyticsConsent && normalizedEventType !== 'consent_updated') {
       return res.status(202).json({
         success: true,
         skipped: true
@@ -102,34 +105,47 @@ const trackEvent = async (req, res) => {
       metadata,
     });
 
-    await TrackingEvent.create({
-      userId: req.userId || null,
+    const sessionKey = {
       sessionId: sessionSnapshot.sessionId,
-      eventType,
-      pagePath: pagePath || '/',
-      referrer: referrer || '',
-      metadata: {
-        ...(metadata || {}),
-        countryCode: sessionSnapshot.countryCode,
-        country: sessionSnapshot.country,
-        state: sessionSnapshot.state,
-        city: sessionSnapshot.city,
-        timezone: sessionSnapshot.timezone,
-        deviceType: sessionSnapshot.deviceType,
-      },
-      consent: {
-        essential: true,
-        analytics: analyticsConsent
-      },
-      ipAddress: sessionSnapshot.ipAddress,
-      userAgent: sessionSnapshot.userAgent
-    });
+      userId: sessionSnapshot.userId || null,
+    };
+
+    if (isHeartbeat) {
+      const existingSession = await ActiveSession.findOne(sessionKey).select('lastSeenAt');
+
+      if (
+        existingSession?.lastSeenAt &&
+        Date.now() - new Date(existingSession.lastSeenAt).getTime() < HEARTBEAT_SESSION_REFRESH_MS
+      ) {
+        return res.status(202).json({ success: true, throttled: true });
+      }
+    } else {
+      await TrackingEvent.create({
+        userId: req.userId || null,
+        sessionId: sessionSnapshot.sessionId,
+        eventType: normalizedEventType,
+        pagePath: pagePath || '/',
+        referrer: referrer || '',
+        metadata: {
+          ...(metadata || {}),
+          countryCode: sessionSnapshot.countryCode,
+          country: sessionSnapshot.country,
+          state: sessionSnapshot.state,
+          city: sessionSnapshot.city,
+          timezone: sessionSnapshot.timezone,
+          deviceType: sessionSnapshot.deviceType,
+        },
+        consent: {
+          essential: true,
+          analytics: analyticsConsent
+        },
+        ipAddress: sessionSnapshot.ipAddress,
+        userAgent: sessionSnapshot.userAgent
+      });
+    }
 
     await ActiveSession.findOneAndUpdate(
-      {
-        sessionId: sessionSnapshot.sessionId,
-        userId: sessionSnapshot.userId || null,
-      },
+      sessionKey,
       sessionSnapshot,
       {
         new: true,
