@@ -35,7 +35,7 @@ const { syncAllSubscriptions } = require('./controllers/webhook.controller');
 const { authenticate, authorizeRoles } = require('./middleware/auth.middleware');
 const { bullBoardRouter } = require('./config/bullBoard');
 const { loadConfig } = require('./services/configManager');
-const { protectForwardedHeaders } = require('./middleware/requestSecurity.middleware');
+const { blockCommonExploitScans, protectForwardedHeaders } = require('./middleware/requestSecurity.middleware');
 const { validateEnvironment } = require('./config/validateEnv');
 const { requestTracing } = require('./middleware/requestTracing.middleware');
 
@@ -106,6 +106,7 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(protectForwardedHeaders);
 app.use(requestTracing);
+app.use(blockCommonExploitScans);
 
 // CORS configuration
 app.use(cors({

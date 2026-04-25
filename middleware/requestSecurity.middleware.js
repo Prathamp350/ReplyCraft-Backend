@@ -25,6 +25,27 @@ const getValidatedForwardedIps = (headerValue) =>
     .map((part) => normalizeIp(part))
     .filter(Boolean);
 
+const commonExploitProbePatterns = [
+  /\/vendor\/phpunit\/phpunit\/src\/Util\/PHP\/eval-stdin\.php/i,
+  /^\/(?:public\/)?index\.php$/i,
+  /^\/containers\/json$/i,
+  /\/\.env(?:\.|$|\/)?/i,
+  /\/wp-(?:admin|content|includes)\//i,
+];
+
+const blockCommonExploitScans = (req, res, next) => {
+  const path = req.path || req.originalUrl || '';
+  const isProbe = commonExploitProbePatterns.some((pattern) => pattern.test(path));
+
+  if (isProbe) {
+    // Public servers get constant internet-wide probes; drop them before
+    // normal 404 logging so operational logs stay useful.
+    return res.status(404).end();
+  }
+
+  next();
+};
+
 const protectForwardedHeaders = (req, res, next) => {
   const forwardedFor = req.headers['x-forwarded-for'];
   const remoteAddress = normalizeIp(req.socket?.remoteAddress || '');
@@ -64,5 +85,6 @@ const protectForwardedHeaders = (req, res, next) => {
 };
 
 module.exports = {
+  blockCommonExploitScans,
   protectForwardedHeaders
 };
