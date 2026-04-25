@@ -6,6 +6,7 @@
 const mongoose = require('mongoose');
 const config = require('../config/config');
 const { replyQueue } = require('../queues/reply.queue');
+const { emailQueue } = require('../queues/email.queue');
 const logger = require('../utils/logger');
 const createRedisConnection = require('../config/redis');
 const { getRuntimeMetricsSnapshot } = require('../utils/runtimeMetrics');
@@ -77,6 +78,35 @@ const getQueueHealth = async () => {
   } catch (error) {
     return {
       queue: 'error',
+    };
+  }
+};
+
+const getQueueSnapshot = async (label, queue) => {
+  try {
+    const counts = await withTimeout(
+      queue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+      `${label} queue counts`
+    );
+    const workers = await withTimeout(queue.getWorkers(), `${label} worker list`);
+    const activeWorkers = workers.filter((worker) => worker.status === 'active' || worker.status === 'ready').length;
+    const waiting = counts.waiting || 0;
+    const failed = counts.failed || 0;
+    const status = waiting > 0 && activeWorkers === 0 ? 'degraded' : failed > 25 ? 'degraded' : 'ok';
+
+    return {
+      name: label,
+      status,
+      workers: activeWorkers,
+      counts,
+    };
+  } catch (error) {
+    return {
+      name: label,
+      status: 'error',
+      workers: 0,
+      counts: {},
+      error: error.message,
     };
   }
 };
@@ -172,6 +202,98 @@ const getRuntimeMetrics = async (req, res) => {
   }
 };
 
+const getAdminSystemHealth = async (req, res) => {
+  try {
+    const [redis, replyQueueHealth, emailQueueHealth] = await Promise.all([
+      getRedisHealth(),
+      getQueueSnapshot('reply-generation', replyQueue),
+      getQueueSnapshot('email', emailQueue),
+    ]);
+
+    const database = getMongoHealth();
+    const runtime = getRuntimeMetricsSnapshot();
+    const services = [
+      {
+        name: 'API process',
+        status: 'ok',
+        detail: `Role ${runtimeRole}, uptime ${Math.round(process.uptime())}s`,
+      },
+      {
+        name: 'MongoDB',
+        status: database,
+        detail: database === 'ok' ? 'Connected' : 'Mongoose is not connected',
+      },
+      {
+        name: 'Redis',
+        status: redis,
+        detail: redis === 'ok' ? 'Ping successful' : 'Redis ping failed',
+      },
+      {
+        name: 'Email worker',
+        status: emailQueueHealth.status,
+        detail: `${emailQueueHealth.workers} active worker(s), ${emailQueueHealth.counts.waiting || 0} waiting`,
+      },
+      {
+        name: 'AI reply worker',
+        status: replyQueueHealth.status,
+        detail: `${replyQueueHealth.workers} active worker(s), ${replyQueueHealth.counts.waiting || 0} waiting`,
+      },
+    ];
+
+    const worstStatus = services.some((service) => service.status === 'error')
+      ? 'error'
+      : services.some((service) => service.status === 'degraded')
+        ? 'degraded'
+        : 'ok';
+
+    const recommendations = [];
+    if (redis !== 'ok') {
+      recommendations.push('Redis is not reachable. Check redis-server/ElastiCache and REDIS_HOST/REDIS_PORT.');
+    }
+    if (emailQueueHealth.status !== 'ok') {
+      recommendations.push('Email queue is degraded. Ensure replycraft-workers is running and connected to Redis.');
+    }
+    if (replyQueueHealth.status !== 'ok') {
+      recommendations.push('Reply queue is degraded. Ensure worker processes are running before scaling traffic.');
+    }
+    if (database !== 'ok') {
+      recommendations.push('MongoDB is disconnected. Check MONGODB_URI, Atlas network access, and DNS.');
+    }
+
+    res.status(200).json({
+      success: true,
+      status: worstStatus,
+      role: runtimeRole,
+      generatedAt: new Date().toISOString(),
+      services,
+      queues: {
+        email: emailQueueHealth,
+        replyGeneration: replyQueueHealth,
+      },
+      runtime,
+      environment: {
+        nodeEnv: process.env.NODE_ENV || 'development',
+        port: config.port,
+        redisHost: process.env.REDIS_HOST || null,
+        redisPort: process.env.REDIS_PORT || null,
+      },
+      security: {
+        adminRoutesProtected: true,
+        auth: 'JWT bearer token with server-side RBAC',
+        allowedRoles: ['superadmin', 'admin'],
+        note: 'Do not put HMAC/API-signing secrets in browser code. Use step-up auth for high-risk actions.',
+      },
+      recommendations,
+    });
+  } catch (error) {
+    logger.error('Failed to get admin system health', { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get system health',
+    });
+  }
+};
+
 /**
  * Get detailed queue metrics
  */
@@ -215,5 +337,6 @@ module.exports = {
   getReadiness,
   getHealth,
   getQueueMetrics,
-  getRuntimeMetrics
+  getRuntimeMetrics,
+  getAdminSystemHealth
 };

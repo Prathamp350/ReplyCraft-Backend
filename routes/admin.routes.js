@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/admin.controller');
 const aiOpsController = require('../controllers/aiOps.controller');
+const { getAdminSystemHealth } = require('../controllers/health.controller');
 const { authenticate, authorizeRoles } = require('../middleware/auth.middleware');
 
 // Apply authentication to all admin routes
@@ -27,6 +28,7 @@ router.put('/plans/:planId', authorizeRoles('superadmin', 'admin'), adminControl
 router.get('/analytics/overview', authorizeRoles('superadmin', 'admin'), adminController.getAnalyticsOverview);
 router.get('/analytics/god-mode', authorizeRoles('superadmin', 'admin'), adminController.getGodModeAnalytics);
 router.get('/analytics/ops', authorizeRoles('superadmin', 'admin'), adminController.getOpsAuditDashboard);
+router.get('/system/health', authorizeRoles('superadmin', 'admin'), getAdminSystemHealth);
 router.get('/ui-config', authorizeRoles('superadmin', 'admin', 'support', 'finance'), adminController.getStaffUiConfig);
 router.put('/ui-config', authorizeRoles('superadmin', 'admin'), adminController.updateStaffUiConfig);
 router.get('/users', authorizeRoles('superadmin', 'admin', 'support'), adminController.getUsers);

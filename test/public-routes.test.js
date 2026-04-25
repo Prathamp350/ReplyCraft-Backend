@@ -175,6 +175,19 @@ test('GET /api/health/runtime allows admin role on runtime metrics route', async
   assert.ok(response.body.runtime);
 });
 
+test('GET /api/admin/system/health allows admin role and returns system posture', async () => {
+  const user = stubUserLookup('admin');
+  const response = await request(app)
+    .get('/api/admin/system/health')
+    .set('Authorization', `Bearer ${signToken(user._id)}`);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.success, true);
+  assert.ok(['ok', 'degraded', 'error'].includes(response.body.status));
+  assert.ok(Array.isArray(response.body.services));
+  assert.equal(response.body.security.adminRoutesProtected, true);
+});
+
 test('middleware allows support role on support-authorized route', async () => {
   const user = stubUserLookup('support');
   const probeApp = createRoleProbeApp('superadmin', 'admin', 'support');
