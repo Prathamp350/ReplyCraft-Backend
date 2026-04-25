@@ -11,8 +11,11 @@ process.env.MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/
 const { app } = require('../server');
 const { authenticate, authorizeRoles } = require('../middleware/auth.middleware');
 const User = require('../models/User');
+const AuditLog = require('../models/AuditLog');
 
 const originalFindById = User.findById;
+const originalFindOne = User.findOne;
+const originalAuditCreate = AuditLog.create;
 
 const buildUser = (role = 'user') => ({
   _id: `507f1f77bcf86cd7994390${role.length}`.padEnd(24, '0'),
@@ -54,6 +57,13 @@ const createRoleProbeApp = (...roles) => {
 
 test.after(() => {
   User.findById = originalFindById;
+  User.findOne = originalFindOne;
+  AuditLog.create = originalAuditCreate;
+});
+
+test.beforeEach(() => {
+  User.findOne = originalFindOne;
+  AuditLog.create = originalAuditCreate;
 });
 
 test('GET / returns backend metadata', async () => {
@@ -199,4 +209,66 @@ test('middleware allows admin role on admin-authorized route', async () => {
   assert.equal(response.status, 200);
   assert.equal(response.body.success, true);
   assert.equal(response.body.role, 'admin');
+});
+
+test('POST /api/auth/login reuses an unexpired OTP to avoid stale queued email codes', async () => {
+  const user = {
+    _id: '507f1f77bcf86cd799439011',
+    name: 'OTP User',
+    email: 'otp@example.com',
+    password: 'hashed-password',
+    isActive: true,
+    failedLoginAttempts: 0,
+    otp: '123456',
+    otpExpiresAt: new Date(Date.now() + 5 * 60000),
+    comparePassword: async () => true,
+    save: async () => user,
+  };
+
+  User.findOne = () => ({
+    select: async () => user,
+  });
+  AuditLog.create = async () => ({});
+
+  const response = await request(app)
+    .post('/api/auth/login')
+    .send({ email: ' OTP@example.com ', password: 'valid-password' });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.success, true);
+  assert.equal(user.otp, '123456');
+});
+
+test('POST /api/auth/verify-otp normalizes typed OTP before comparing', async () => {
+  const user = {
+    _id: '507f1f77bcf86cd799439012',
+    name: 'OTP User',
+    email: 'otp@example.com',
+    plan: 'free',
+    monthlyUsage: { count: 0, lastReset: new Date() },
+    avatarUrl: null,
+    role: 'user',
+    isOnboarded: false,
+    isEmailVerified: true,
+    isActive: true,
+    otp: '123456',
+    otpExpiresAt: new Date(Date.now() + 5 * 60000),
+    checkMonthlyLimit: () => ({ exceeded: false, used: 0, limit: 100, remaining: 100 }),
+    save: async () => user,
+  };
+
+  User.findOne = () => ({
+    then: (resolve) => Promise.resolve(resolve(user)),
+    catch: () => undefined,
+  });
+  AuditLog.create = async () => ({});
+
+  const response = await request(app)
+    .post('/api/auth/verify-otp')
+    .send({ email: ' OTP@example.com ', otp: ' 123-456 ' });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.success, true);
+  assert.ok(response.body.token);
+  assert.equal(user.otp, null);
 });

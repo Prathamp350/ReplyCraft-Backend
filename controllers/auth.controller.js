@@ -26,6 +26,34 @@ const generateOtp = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+const normalizeEmail = (email = '') => String(email).trim().toLowerCase();
+
+const normalizeOtp = (otp = '') =>
+  String(otp)
+    .trim()
+    .replace(/\D/g, '')
+    .slice(0, 6);
+
+const getValidOrNewOtp = (user) => {
+  const now = new Date();
+  const existingOtp = normalizeOtp(user.otp);
+  const existingExpiry = user.otpExpiresAt ? new Date(user.otpExpiresAt) : null;
+
+  if (existingOtp.length === 6 && existingExpiry && existingExpiry > now) {
+    return {
+      otp: existingOtp,
+      otpExpiresAt: existingExpiry,
+      reused: true,
+    };
+  }
+
+  return {
+    otp: generateOtp(),
+    otpExpiresAt: new Date(Date.now() + 5 * 60000),
+    reused: false,
+  };
+};
+
 /**
  * Google Login - Exchange Google ID token for JWT
  */
@@ -208,15 +236,14 @@ const register = async (req, res) => {
 
     // Check if user already exists
     // Check if user already exists
-    let user = await User.findOne({ email: email.toLowerCase() });
+    const normalizedEmail = normalizeEmail(email);
+    let user = await User.findOne({ email: normalizedEmail });
     
     // Validate plan if provided
     const userPlan = plan && config.validPlans.includes(plan.toLowerCase()) 
       ? plan.toLowerCase() 
       : config.defaultPlan;
-
-    const otp = generateOtp();
-    const otpExpiresAt = new Date(Date.now() + 5 * 60000); // 5 minutes
+    let issuedOtp = null;
 
     if (user) {
       if (user.isEmailVerified) {
@@ -225,13 +252,15 @@ const register = async (req, res) => {
           error: 'Email already registered'
         });
       }
+
+      issuedOtp = getValidOrNewOtp(user);
       
       // User exists but is not verified. Update their details and send a new OTP.
       user.name = name.trim();
       user.password = password; // Mongoose middleware will hash this
       user.plan = userPlan;
-      user.otp = otp;
-      user.otpExpiresAt = otpExpiresAt;
+      user.otp = issuedOtp.otp;
+      user.otpExpiresAt = issuedOtp.otpExpiresAt;
       await user.save();
       
       logger.logAuth('Unverified user re-registered, sending new OTP', { userId: user._id, email: user.email });
@@ -239,19 +268,20 @@ const register = async (req, res) => {
       // Create new user
       user = new User({
         name: name.trim(),
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         password,
         plan: userPlan,
         isEmailVerified: false,
-        otp,
-        otpExpiresAt
       });
+      issuedOtp = getValidOrNewOtp(user);
+      user.otp = issuedOtp.otp;
+      user.otpExpiresAt = issuedOtp.otpExpiresAt;
       await user.save();
       logger.logAuth('User registered, pending OTP', { userId: user._id, email: user.email });
     }
 
     // Queue OTP email
-    queueOtpEmail(user.email, user.name, otp, { ip: req.ip, userAgent: req.headers['user-agent'] }).catch(err => {
+    queueOtpEmail(user.email, user.name, issuedOtp.otp, { ip: req.ip, userAgent: req.headers['user-agent'] }).catch(err => {
       logger.error('Failed to queue OTP email', { error: err.message, userId: user._id });
     });
 
@@ -295,13 +325,14 @@ const login = async (req, res) => {
     }
 
     // Find user by email (include password for comparison)
-    const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
+    const normalizedEmail = normalizeEmail(email);
+    const user = await User.findOne({ email: normalizedEmail }).select('+password');
     
     if (!user) {
-      logger.logAuth('Login failed - user not found', { email: email.toLowerCase() });
+      logger.logAuth('Login failed - user not found', { email: normalizedEmail });
       await logAccessEvent({
         req,
-        email: email.toLowerCase(),
+        email: normalizedEmail,
         eventType: 'login_failed',
         status: 'failed',
         riskLevel: 'medium',
@@ -428,12 +459,12 @@ const login = async (req, res) => {
     }
 
     // Generate new OTP
-    const otp = generateOtp();
+    const { otp, otpExpiresAt, reused } = getValidOrNewOtp(user);
     user.otp = otp;
-    user.otpExpiresAt = new Date(Date.now() + 5 * 60000); // 5 mins
+    user.otpExpiresAt = otpExpiresAt;
     await user.save();
 
-    logger.logAuth('User initiated login, OTP sent', { userId: user._id, email: user.email });
+    logger.logAuth('User initiated login, OTP sent', { userId: user._id, email: user.email, otpReused: reused });
     await logAccessEvent({
       req,
       user,
@@ -482,18 +513,27 @@ const login = async (req, res) => {
 const verifyOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedOtp = normalizeOtp(otp);
 
-    if (!email || !otp) {
+    if (!normalizedEmail || !normalizedOtp) {
       return res.status(400).json({ success: false, error: 'Email and OTP are required' });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
       return res.status(400).json({ success: false, error: 'Invalid operation' });
     }
 
-    if (user.otp !== otp || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
+    if (normalizeOtp(user.otp) !== normalizedOtp || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
+      logger.warn('OTP verification failed', {
+        userId: user._id,
+        email: user.email,
+        hasStoredOtp: Boolean(user.otp),
+        hasExpiry: Boolean(user.otpExpiresAt),
+        expired: user.otpExpiresAt ? user.otpExpiresAt < new Date() : null,
+      });
       return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
     }
 
@@ -588,12 +628,13 @@ const verifyOtp = async (req, res) => {
 const resendOtp = async (req, res) => {
   try {
     const { email } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
-    if (!email) {
+    if (!normalizedEmail) {
       return res.status(400).json({ success: false, error: 'Email is required' });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
       // Return 200 to prevent email enumeration
@@ -601,12 +642,12 @@ const resendOtp = async (req, res) => {
     }
 
     // Generate new OTP
-    const otp = generateOtp();
+    const { otp, otpExpiresAt, reused } = getValidOrNewOtp(user);
     user.otp = otp;
-    user.otpExpiresAt = new Date(Date.now() + 5 * 60000); // 5 mins
+    user.otpExpiresAt = otpExpiresAt;
     await user.save();
 
-    logger.logAuth('Resent OTP', { userId: user._id, email: user.email });
+    logger.logAuth('Resent OTP', { userId: user._id, email: user.email, otpReused: reused });
 
     // Queue OTP email
     queueOtpEmail(user.email, user.name, otp, { ip: req.ip, userAgent: req.headers['user-agent'] }, 'resend-otp').catch(err => {
@@ -674,18 +715,19 @@ const getCurrentUser = async (req, res) => {
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail) {
       return res.status(400).json({ success: false, error: 'Email is required' });
     }
     
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
       return res.status(200).json({ success: true, message: 'If the email exists, an OTP will be sent.' });
     }
 
-    const otp = generateOtp();
+    const { otp, otpExpiresAt } = getValidOrNewOtp(user);
     user.otp = otp;
-    user.otpExpiresAt = new Date(Date.now() + 5 * 60000);
+    user.otpExpiresAt = otpExpiresAt;
     await user.save();
 
     queueOtpEmail(user.email, user.name, otp, { ip: req.ip, userAgent: req.headers['user-agent'] }, 'password-reset').catch(err => {
@@ -705,8 +747,10 @@ const forgotPassword = async (req, res) => {
 const resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
+    const normalizedEmail = normalizeEmail(email);
+    const normalizedOtp = normalizeOtp(otp);
 
-    if (!email || !otp || !newPassword) {
+    if (!normalizedEmail || !normalizedOtp || !newPassword) {
       return res.status(400).json({ success: false, error: 'Email, OTP, and new password are required' });
     }
 
@@ -715,12 +759,12 @@ const resetPassword = async (req, res) => {
       return res.status(400).json({ success: false, error: passwordError });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase() });
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
       return res.status(400).json({ success: false, error: 'Invalid operation' });
     }
 
-    if (user.otp !== otp || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
+    if (normalizeOtp(user.otp) !== normalizedOtp || !user.otpExpiresAt || user.otpExpiresAt < new Date()) {
       return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
     }
 
