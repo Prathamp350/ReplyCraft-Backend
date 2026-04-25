@@ -44,7 +44,7 @@ const getRedisHealth = async () => {
   let redisClient;
   try {
     redisClient = createRedisConnection();
-    await withTimeout(redisClient.connect(), 'Redis connect');
+    redisClient.on('error', () => {});
     await withTimeout(redisClient.ping(), 'Redis ping');
     return 'ok';
   } catch (error) {
@@ -98,6 +98,8 @@ const getQueueSnapshot = async (label, queue) => {
       name: label,
       status,
       workers: activeWorkers,
+      visibleWorkers: activeWorkers,
+      workerVisibility: activeWorkers > 0 ? 'visible' : 'not_visible_from_queue_probe',
       counts,
     };
   } catch (error) {
@@ -105,6 +107,8 @@ const getQueueSnapshot = async (label, queue) => {
       name: label,
       status: 'error',
       workers: 0,
+      visibleWorkers: 0,
+      workerVisibility: 'unknown',
       counts: {},
       error: error.message,
     };
@@ -231,12 +235,12 @@ const getAdminSystemHealth = async (req, res) => {
       {
         name: 'Email worker',
         status: emailQueueHealth.status,
-        detail: `${emailQueueHealth.workers} active worker(s), ${emailQueueHealth.counts.waiting || 0} waiting`,
+        detail: `${emailQueueHealth.visibleWorkers ?? 0} visible BullMQ worker(s), ${emailQueueHealth.counts.waiting || 0} waiting`,
       },
       {
         name: 'AI reply worker',
         status: replyQueueHealth.status,
-        detail: `${replyQueueHealth.workers} active worker(s), ${replyQueueHealth.counts.waiting || 0} waiting`,
+        detail: `${replyQueueHealth.visibleWorkers ?? 0} visible BullMQ worker(s), ${replyQueueHealth.counts.waiting || 0} waiting`,
       },
     ];
 
