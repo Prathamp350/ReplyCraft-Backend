@@ -12,6 +12,7 @@
     "check": "node scripts/ci-smoke.js",
     "test": "node --test --test-force-exit test/**/*.test.js",
     "smoke:deployed": "node scripts/deployed-smoke.js",
+    "secret:jwt": "node scripts/generate-secret.js",
     "backup:mongo": "node scripts/backup-mongo.js",
     "restore:mongo": "node scripts/restore-mongo.js",
     "ops:doctor": "node scripts/ops-doctor.js"

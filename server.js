@@ -276,7 +276,11 @@ const startServer = async () => {
     });
     return server;
   } catch (error) {
-    logger.error('Failed to connect to MongoDB', { error: error.message });
+    logger.error('Backend startup failed', {
+      error: error.message,
+      stack: error.stack,
+      validationErrors: error.validationErrors,
+    });
     process.exit(1);
   }
 };
