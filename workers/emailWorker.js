@@ -8,9 +8,9 @@ const IORedis = require('ioredis');
 const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
-const config = require('../config/config');
 
 const createRedisConnection = require('../config/redis');
+const { startBullWorker } = require('./utils/startBullWorker');
 
 // Import the modular transporter singletons
 const { authTransporter, supportTransporter, noreplyTransporter } = require('../services/email/transporter');
@@ -107,13 +107,6 @@ async function sendEmail(to, subject, html, type) {
     html,
     text: html.replace(/<[^>]*>/g, '')
   };
-
-  // Debug: confirm FROM matches transporter auth user
-  console.log("ACTUAL FROM:", mailOptions.from);
-  console.log("Sending email:", {
-    from: mailOptions.from,
-    user: transporter ? transporter.options.auth.user : 'NO_TRANSPORTER'
-  });
 
   // If no transporter, just log
   if (!transporter) {
@@ -246,36 +239,49 @@ async function processEmailJob(job) {
   return result;
 }
 
-// Create the email worker
-const emailWorker = new Worker('email', async (job) => {
-  return await processEmailJob(job);
-}, {
-  connection,
-  concurrency: 5,
-  limiter: {
-    max: 10,
-    duration: 1000
+let emailWorker = null;
+
+const createEmailWorker = () => {
+  if (emailWorker) {
+    return emailWorker;
   }
-});
 
-// Worker events
-emailWorker.on('completed', (job) => {
-  logger.info('Email job completed', { jobId: job.id, type: job.data.type });
-});
-
-emailWorker.on('failed', (job, err) => {
-  logger.error('Email job failed', { 
-    jobId: job.id, 
-    type: job.data.type,
-    error: err.message 
+  emailWorker = new Worker('email', async (job) => {
+    return await processEmailJob(job);
+  }, {
+    connection,
+    concurrency: 5,
+    limiter: {
+      max: 10,
+      duration: 1000
+    }
   });
-});
 
-emailWorker.on('error', (error) => {
-  logger.error('Email worker error', { error: error.message });
-});
+  emailWorker.on('completed', (job) => {
+    logger.info('Email job completed', { jobId: job.id, type: job.data.type });
+  });
 
-logger.info('[EmailWorker] Email worker started', { concurrency: 5 });
+  emailWorker.on('failed', (job, err) => {
+    logger.error('Email job failed', {
+      jobId: job?.id,
+      type: job?.data?.type,
+      error: err.message
+    });
+  });
+
+  emailWorker.on('error', (error) => {
+    logger.error('Email worker error', { error: error.message });
+  });
+
+  logger.info('[EmailWorker] Email worker started', { concurrency: 5 });
+  return emailWorker;
+};
+
+startBullWorker({
+  label: 'EmailWorker',
+  connection,
+  createWorker: createEmailWorker,
+});
 
 // Graceful shutdown
 const gracefulShutdown = async () => {

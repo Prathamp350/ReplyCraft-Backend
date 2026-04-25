@@ -1,11 +1,12 @@
 const cron = require('node-cron');
 const User = require('../models/User');
 const logger = require('../utils/logger');
+const { withCronLock } = require('../utils/cronLock');
 
 /**
  * Reset monthly usage for all users on the 1st of the month
  */
-const resetMonthlyUsage = async () => {
+const resetMonthlyUsage = async () => withCronLock('reset-monthly-usage', async () => {
   try {
     logger.info('Running monthly usage reset');
     
@@ -23,13 +24,9 @@ const resetMonthlyUsage = async () => {
   } catch (error) {
     logger.error('Error resetting monthly usage', { error: error.message, stack: error.stack });
   }
-};
+}, { ttlMs: 30 * 60 * 1000 });
 
-// Schedule: Run at midnight on the 1st of every month
-cron.schedule('0 0 1 * *', resetMonthlyUsage);
-
-// Cleanup check every day to handle month boundaries
-cron.schedule('0 0 * * *', async () => {
+const cleanupMonthlyBoundaryUsage = async () => withCronLock('cleanup-monthly-boundary-usage', async () => {
   try {
     const now = new Date();
     // Start of the current month
@@ -55,8 +52,15 @@ cron.schedule('0 0 * * *', async () => {
   } catch (error) {
     logger.error('Error in monthly boundary cleanup', { error: error.message, stack: error.stack });
   }
-});
+}, { ttlMs: 30 * 60 * 1000 });
+
+// Schedule: Run at midnight on the 1st of every month
+cron.schedule('0 0 1 * *', resetMonthlyUsage);
+
+// Cleanup check every day to handle month boundaries
+cron.schedule('0 0 * * *', cleanupMonthlyBoundaryUsage);
 
 module.exports = {
-  resetMonthlyUsage
+  resetMonthlyUsage,
+  cleanupMonthlyBoundaryUsage
 };

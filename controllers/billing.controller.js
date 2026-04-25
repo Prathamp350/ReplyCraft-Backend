@@ -1027,12 +1027,40 @@ const handleWebhook = async (req, res) => {
     const { event: eventType } = event;
     const eventId = req.headers['x-razorpay-event-id'];
 
-    logger.info('Razorpay webhook received', { eventType });
+    logger.info('Razorpay webhook received', { eventType, eventId: eventId || null });
 
     if (eventId) {
-      const duplicate = await RazorpayWebhookEvent.findOne({ eventId });
-      if (duplicate) {
+      const reserveResult = await RazorpayWebhookEvent.findOneAndUpdate(
+        { eventId },
+        {
+          $setOnInsert: {
+            eventId,
+            eventType,
+            paymentId: event.payload?.payment?.entity?.id || null,
+            orderId: event.payload?.payment?.entity?.order_id || null,
+            status: 'processing',
+            processedAt: null,
+            lastError: null,
+          },
+        },
+        {
+          upsert: true,
+          new: true,
+          rawResult: true,
+        }
+      );
+
+      const existingRecord = reserveResult.value;
+      const wasInserted = !reserveResult.lastErrorObject.updatedExisting;
+
+      if (!wasInserted && existingRecord?.status === 'processed') {
+        logger.info('Skipping already processed Razorpay webhook event', { eventId, eventType });
         return res.status(200).json({ received: true, duplicate: true });
+      }
+
+      if (!wasInserted && existingRecord?.status === 'processing') {
+        logger.warn('Razorpay webhook event is already processing', { eventId, eventType });
+        return res.status(202).json({ received: true, processing: true });
       }
     }
 
@@ -1128,17 +1156,38 @@ const handleWebhook = async (req, res) => {
     }
 
     if (eventId) {
-      await RazorpayWebhookEvent.create({
-        eventId,
-        eventType,
-        paymentId: event.payload?.payment?.entity?.id || null,
-        orderId: event.payload?.payment?.entity?.order_id || null,
-      });
+      await RazorpayWebhookEvent.updateOne(
+        { eventId },
+        {
+          $set: {
+            eventType,
+            paymentId: event.payload?.payment?.entity?.id || null,
+            orderId: event.payload?.payment?.entity?.order_id || null,
+            status: 'processed',
+            processedAt: new Date(),
+            lastError: null,
+          },
+        }
+      );
     }
 
     return res.status(200).json({ received: true });
 
   } catch (error) {
+    const eventId = req.headers['x-razorpay-event-id'];
+    if (eventId) {
+      await RazorpayWebhookEvent.updateOne(
+        { eventId },
+        {
+          $set: {
+            status: 'failed',
+            lastError: error.message,
+            processedAt: new Date(),
+          },
+        }
+      ).catch(() => undefined);
+    }
+
     logger.error('Webhook error', { error: error.message });
     return res.status(500).json({ error: 'Webhook processing failed' });
   }

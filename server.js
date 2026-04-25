@@ -27,15 +27,17 @@ const trackingRoutes = require('./routes/tracking.routes');
 const path = require('path');
 const fs = require('fs');
 const logger = require('./utils/logger');
-const { generalLimiter, authLimiter, aiLimiter } = require('./middleware/rateLimiter');
-const { getHealth, getQueueMetrics } = require('./controllers/health.controller');
+const { generalLimiter, authLimiter } = require('./middleware/rateLimiter');
+const { getLiveness, getReadiness, getHealth, getQueueMetrics, getRuntimeMetrics } = require('./controllers/health.controller');
 const { sendTestEmail, getEmailStatus } = require('./controllers/test.controller');
 const { validateEmailConfig } = require('./config/emailValidator');
 const { syncAllSubscriptions } = require('./controllers/webhook.controller');
-const { authenticate } = require('./middleware/auth.middleware');
+const { authenticate, authorizeRoles } = require('./middleware/auth.middleware');
 const { bullBoardRouter } = require('./config/bullBoard');
 const { loadConfig } = require('./services/configManager');
 const { protectForwardedHeaders } = require('./middleware/requestSecurity.middleware');
+const { validateEnvironment } = require('./config/validateEnv');
+const { requestTracing } = require('./middleware/requestTracing.middleware');
 
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:8080',
@@ -89,18 +91,6 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Initialize cron jobs
-require('./cron/resetUsage');
-require('./cron/queueMetrics');
-require('./cron/subscriptionNotifications');
-
-// Import workers (they self-initialize)
-require('./workers/reviewFetcher');
-require('./workers/aiWorker');
-require('./workers/emailWorker');
-require('./workers/googleReviewFetcher');
-require('./workers/insightWorker');
-
 // Validate email configuration at startup
 validateEmailConfig();
 
@@ -115,6 +105,7 @@ app.set('trust proxy', 1);
 // Security middleware
 app.use(helmet());
 app.use(protectForwardedHeaders);
+app.use(requestTracing);
 
 // CORS configuration
 app.use(cors({
@@ -164,19 +155,9 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // Apply global rate limiting
 app.use(generalLimiter);
 
-// Request logging middleware
-app.use((req, res, next) => {
-  logger.http(`${req.method} ${req.path}`, {
-    ip: req.ip,
-    method: req.method,
-    path: req.path
-  });
-  next();
-});
-
 // Routes with rate limiting
 app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/reply', aiLimiter, replyRoutes);
+app.use('/api/reply', replyRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/google', googleRoutes);
 app.use('/api/profile', profileRoutes);
@@ -207,11 +188,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get('/livez', getLiveness);
+app.get('/readyz', getReadiness);
+
 // Detailed health check with database, redis, queue status
 app.get('/api/health', getHealth);
 
 // Queue metrics endpoint
 app.get('/api/health/queue', getQueueMetrics);
+app.get('/api/health/runtime', authenticate, authorizeRoles('admin', 'superadmin'), getRuntimeMetrics);
 
 // Test endpoints (protected)
 app.post('/api/test/email', authenticate, sendTestEmail);
@@ -274,6 +259,9 @@ app.use((err, req, res, next) => {
 // Connect to MongoDB and start server
 const startServer = async () => {
   try {
+    const envCheck = validateEnvironment({ role: 'api' });
+    envCheck.warnings.forEach((warning) => logger.warn('[EnvValidation]', { warning }));
+
     await mongoose.connect(config.mongodb.uri);
     logger.info('Connected to MongoDB');
     await loadConfig();
@@ -282,16 +270,22 @@ const startServer = async () => {
     await syncAllSubscriptions();
     
     const PORT = config.port;
-    app.listen(PORT, '0.0.0.0', () => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
       logger.info(`ReplyCraft AI Backend running on port ${PORT} bound to 0.0.0.0`);
       logger.info('Available endpoints: POST /api/auth/register, POST /api/auth/login, POST /api/reply/generate-reply, POST /api/reviews/process, GET /health');
     });
+    return server;
   } catch (error) {
     logger.error('Failed to connect to MongoDB', { error: error.message });
     process.exit(1);
   }
 };
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
 
-module.exports = app;
+module.exports = {
+  app,
+  startServer,
+};

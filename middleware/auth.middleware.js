@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 const baseConfig = require('../config/config');
 const User = require('../models/User');
 const logger = require('../utils/logger');
+const { updateRequestContext } = require('../utils/requestContext');
 
 const getJwtSecret = () => baseConfig?.jwt?.secret || process.env.JWT_SECRET;
 
@@ -97,6 +98,11 @@ const authenticate = async (req, res, next) => {
     req.user = user;
     req.userId = user._id;
     req.authMethod = authMethod;
+    updateRequestContext({
+      userId: user._id?.toString?.() || String(user._id),
+      role: user.role || null,
+      authMethod,
+    });
 
     next();
     

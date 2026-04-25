@@ -6,6 +6,7 @@
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
+const { getRequestContext } = require('./requestContext');
 
 // Ensure logs directory exists
 const logsDir = path.join(__dirname, '..', 'logs');
@@ -34,8 +35,24 @@ const colors = {
 // Add colors to winston
 winston.addColors(colors);
 
+const enrichWithRequestContext = winston.format((info) => {
+  const context = getRequestContext();
+  if (!context) {
+    return info;
+  }
+
+  if (context.requestId && !info.requestId) info.requestId = context.requestId;
+  if (context.userId && !info.userId) info.userId = context.userId;
+  if (context.role && !info.role) info.role = context.role;
+  if (context.path && !info.path) info.path = context.path;
+  if (context.method && !info.method) info.method = context.method;
+
+  return info;
+});
+
 // Create format for console output
 const consoleFormat = winston.format.combine(
+  enrichWithRequestContext(),
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.colorize({ all: true }),
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
@@ -51,6 +68,7 @@ const consoleFormat = winston.format.combine(
 
 // Create format for file output
 const fileFormat = winston.format.combine(
+  enrichWithRequestContext(),
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
   winston.format.json()

@@ -8,7 +8,7 @@ let bullBoardRouter = null;
 
 try {
   // Only load Bull Board if not in production
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test') {
     const { createBullBoard } = require('@bull-board/api');
     const { BullMQAdapter } = require('@bull-board/api/bullMQAdapter');
     const { ExpressAdapter } = require('@bull-board/express');
@@ -27,7 +27,9 @@ try {
     console.log('✅ Bull Board queue monitoring enabled at /admin/queues');
   }
 } catch (error) {
-  console.warn('⚠️  Bull Board could not be initialized:', error.message);
+  if (process.env.NODE_ENV !== 'test') {
+    console.warn('⚠️  Bull Board could not be initialized:', error.message);
+  }
   bullBoardRouter = null;
 }
 

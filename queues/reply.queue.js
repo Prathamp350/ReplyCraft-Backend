@@ -1,36 +1,64 @@
 const { Queue } = require('bullmq');
-const IORedis = require('ioredis');
 const logger = require('../utils/logger');
 
 const createRedisConnection = require('../config/redis');
+const isTest = process.env.NODE_ENV === 'test';
 
-// Get the cleaned, standardized Redis connection
-const connection = createRedisConnection();
-
-connection.on('error', (err) => {
-  logger.error('Redis connection error in reply queue', { error: err.message });
+const createMockReplyQueue = () => ({
+  add: async (name, data, options = {}) => ({
+    id: options.jobId || `mock-${Date.now()}`,
+    name,
+    data,
+  }),
+  addBulk: async (jobs) =>
+    jobs.map((job, index) => ({
+      id: job.jobId || `mock-${index}`,
+      name: job.name,
+      data: job.data,
+    })),
+  getJobCounts: async () => ({
+    waiting: 0,
+    active: 0,
+    completed: 0,
+    failed: 0,
+    delayed: 0,
+  }),
+  getWorkers: async () => [],
+  getWaiting: async () => [],
+  getCompleted: async () => [],
+  getFailed: async () => [],
+  clean: async () => undefined,
 });
 
-// Create the reply queue
-const replyQueue = new Queue('reply-generation', {
-  connection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000
-    },
-    timeout: 60000, // 60 second timeout
-    // IDEMPOTENCY: Remove job if it completes within 24 hours
-    removeOnComplete: {
-      count: 100,
-      age: 24 * 3600 // 24 hours
-    },
-    removeOnFail: {
-      count: 100
-    }
-  }
-});
+const replyQueue = isTest
+  ? createMockReplyQueue()
+  : (() => {
+      const connection = createRedisConnection();
+
+      connection.on('error', (err) => {
+        logger.error('Redis connection error in reply queue', { error: err.message });
+      });
+
+      return new Queue('reply-generation', {
+        connection,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 2000
+          },
+          timeout: 60000, // 60 second timeout
+          // IDEMPOTENCY: Remove job if it completes within 24 hours
+          removeOnComplete: {
+            count: 100,
+            age: 24 * 3600 // 24 hours
+          },
+          removeOnFail: {
+            count: 100
+          }
+        }
+      });
+    })();
 
 /**
  * Add a reply generation job to the queue
@@ -50,7 +78,7 @@ async function queueReplyGeneration(data) {
   } = data;
 
   // IDEMPOTENCY KEY: Create unique job ID to prevent duplicate jobs
-  const jobId = `${platform || 'unknown'}-${reviewId || Date.now()}-${action}`;
+  const jobId = `${userId || 'unknown-user'}-${platform || 'unknown'}-${reviewId || Date.now()}-${action}`;
 
   const job = await replyQueue.add('generateReply', {
     reviewId,
@@ -86,7 +114,7 @@ async function queueBulkReplyGeneration(jobs) {
   const bulkJobs = jobs.map((data, index) => {
     // Create unique job ID for deduplication
     const action = data.action || 'generateReply';
-    const jobId = `${data.platform || 'unknown'}-${data.reviewId || `${Date.now()}-${index}`}-${action}`;
+    const jobId = `${data.userId || 'unknown-user'}-${data.platform || 'unknown'}-${data.reviewId || `${Date.now()}-${index}`}-${action}`;
     
     return {
       name: 'generateReply',

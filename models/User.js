@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const { getConfig } = require('../services/configManager');
 const baseConfig = require('../config/config');
+const logger = require('../utils/logger');
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -356,7 +357,10 @@ userSchema.methods.syncSubscriptionStatus = async function() {
   // Check if subscription has expired
   if (this.subscriptionCurrentPeriodEnd && this.subscriptionCurrentPeriodEnd < now) {
     if (this.plan !== 'free') {
-      console.log(`[Subscription] Expiring subscription for user ${this._id}, downgrading to free`);
+      logger.logBilling('Subscription expired, downgrading user to free', {
+        userId: this._id,
+        previousPlan: this.plan,
+      });
 
       this.plan = 'free';
       this.lastPlanChangeAt = now;
@@ -381,7 +385,7 @@ userSchema.methods.syncSubscriptionStatus = async function() {
       return {
         downgraded: true,
         reason: 'subscription_expired',
-        newPlan: nextPlan
+        newPlan: 'free'
       };
     }
   }
@@ -389,7 +393,11 @@ userSchema.methods.syncSubscriptionStatus = async function() {
   // Check if subscription is inactive due to payment failure
   if (this.subscriptionStatus === 'past_due' || this.subscriptionStatus === 'unpaid') {
     if (this.plan !== 'free') {
-      console.log(`[Subscription] Payment issue for user ${this._id}, downgrading to free`);
+      logger.logBilling('Subscription payment issue, downgrading user to free', {
+        userId: this._id,
+        previousPlan: this.plan,
+        subscriptionStatus: this.subscriptionStatus,
+      });
       
       this.plan = 'free';
       this.extraStorageMB = 0;

@@ -8,6 +8,7 @@ const { rateLimit } = require('express-rate-limit');
 const Redis = require('ioredis');
 const logger = require('../utils/logger');
 const config = require('../config/config');
+const isTest = process.env.NODE_ENV === 'test';
 
 let RedisStore;
 let redisClient;
@@ -15,34 +16,38 @@ let useRedis = false;
 
 // Attempt to establish Redis connection (lazy — won't crash if offline)
 try {
-  const { RedisStore: RS } = require('rate-limit-redis');
-  RedisStore = RS;
+  if (!isTest) {
+    const { RedisStore: RS } = require('rate-limit-redis');
+    RedisStore = RS;
 
-  redisClient = new Redis({
-    host: config.redis.host,
-    port: config.redis.port,
-    lazyConnect: true,        // Don't connect on construction
-    enableOfflineQueue: false, // Don't queue commands when offline
-    maxRetriesPerRequest: 1,   // Fail fast — don't hang for 20 retries
-    retryStrategy: () => null  // Disable automatic reconnect in dev
-  });
+    redisClient = new Redis({
+      host: config.redis.host,
+      port: config.redis.port,
+      lazyConnect: true,        // Don't connect on construction
+      enableOfflineQueue: false, // Don't queue commands when offline
+      maxRetriesPerRequest: 1,   // Fail fast — don't hang for 20 retries
+      retryStrategy: () => null  // Disable automatic reconnect in dev
+    });
 
-  redisClient.on('error', (err) => {
-    if (useRedis) {
-      logger.warn('Redis Rate Limiter Error - falling back to memory', { error: err.message });
-      useRedis = false;
-    }
-  });
+    redisClient.on('error', (err) => {
+      if (useRedis) {
+        logger.warn('Redis Rate Limiter Error - falling back to memory', { error: err.message });
+        useRedis = false;
+      }
+    });
 
-  redisClient.connect().then(() => {
-    useRedis = true;
-    logger.info('Redis Rate Limiter connected');
-  }).catch(() => {
-    logger.warn('[RateLimiter] Redis offline - using in-memory fallback for rate limiting');
-  });
+    redisClient.connect().then(() => {
+      useRedis = true;
+      logger.info('Redis Rate Limiter connected');
+    }).catch(() => {
+      logger.warn('[RateLimiter] Redis offline - using in-memory fallback for rate limiting');
+    });
+  }
 
 } catch (e) {
-  logger.warn('[RateLimiter] rate-limit-redis not available - using in-memory fallback');
+  if (!isTest) {
+    logger.warn('[RateLimiter] rate-limit-redis not available - using in-memory fallback');
+  }
 }
 
 /**

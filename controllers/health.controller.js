@@ -4,18 +4,112 @@
  */
 
 const mongoose = require('mongoose');
-const Redis = require('ioredis');
 const config = require('../config/config');
 const { replyQueue } = require('../queues/reply.queue');
 const logger = require('../utils/logger');
+const createRedisConnection = require('../config/redis');
+const { getRuntimeMetricsSnapshot } = require('../utils/runtimeMetrics');
 
-// Create Redis connection for health check
-const createRedisConnection = () => {
-  return new Redis({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT) || 6379,
-    lazyConnect: true,
-    connectionName: 'health-check'
+const runtimeRole = process.env.RUNTIME_ROLE || 'api';
+const HEALTH_CHECK_TIMEOUT_MS = 1500;
+
+const withTimeout = async (promise, label, timeoutMs = HEALTH_CHECK_TIMEOUT_MS) => {
+  let timeoutHandle;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+};
+
+const getMongoHealth = () => {
+  try {
+    return mongoose.connection.readyState === 1 ? 'ok' : 'error';
+  } catch (error) {
+    return 'error';
+  }
+};
+
+const getRedisHealth = async () => {
+  let redisClient;
+  try {
+    redisClient = createRedisConnection();
+    await withTimeout(redisClient.connect(), 'Redis connect');
+    await withTimeout(redisClient.ping(), 'Redis ping');
+    return 'ok';
+  } catch (error) {
+    return 'error';
+  } finally {
+    if (redisClient) {
+      try {
+        await withTimeout(redisClient.quit(), 'Redis quit', 500);
+      } catch (cleanupError) {
+        redisClient.disconnect();
+      }
+    }
+  }
+};
+
+const getQueueHealth = async () => {
+  try {
+    const counts = await withTimeout(
+      replyQueue.getJobCounts('waiting', 'active', 'completed', 'failed'),
+      'Queue job counts'
+    );
+    const workers = await withTimeout(replyQueue.getWorkers(), 'Queue worker list');
+    const activeWorkers = workers.filter((worker) => worker.status === 'active' || worker.status === 'ready').length;
+    const queue = (counts.waiting || 0) > 0 && activeWorkers === 0 ? 'degraded' : 'ok';
+
+    return {
+      queue,
+      queueStats: counts,
+      queueWorkers: activeWorkers,
+    };
+  } catch (error) {
+    return {
+      queue: 'error',
+    };
+  }
+};
+
+const getLiveness = async (req, res) => {
+  res.status(200).json({
+    success: true,
+    status: 'alive',
+    role: runtimeRole,
+    uptime: Math.round(process.uptime()),
+    timestamp: Date.now(),
+  });
+};
+
+const getReadiness = async (req, res) => {
+  const database = getMongoHealth();
+  const redis = await getRedisHealth();
+  const queueHealth = await getQueueHealth();
+
+  const readiness = {
+    role: runtimeRole,
+    database,
+    redis,
+    queue: queueHealth.queue,
+    queueWorkers: queueHealth.queueWorkers ?? 0,
+    timestamp: Date.now(),
+  };
+
+  const isReady = database === 'ok' && redis === 'ok' && queueHealth.queue !== 'error';
+
+  res.status(isReady ? 200 : 503).json({
+    success: isReady,
+    ...readiness,
   });
 };
 
@@ -25,47 +119,22 @@ const createRedisConnection = () => {
 const getHealth = async (req, res) => {
   const health = {
     server: 'ok',
+    role: runtimeRole,
     database: 'unknown',
     redis: 'unknown',
     queue: 'unknown',
+    runtime: getRuntimeMetricsSnapshot(),
     timestamp: Date.now()
   };
 
   // Check MongoDB
-  try {
-    const mongoStatus = mongoose.connection.readyState;
-    health.database = mongoStatus === 1 ? 'ok' : 'error';
-  } catch (error) {
-    health.database = 'error';
-  }
+  health.database = getMongoHealth();
 
   // Check Redis
-  let redisClient;
-  try {
-    redisClient = createRedisConnection();
-    await redisClient.connect();
-    await redisClient.ping();
-    health.redis = 'ok';
-  } catch (error) {
-    health.redis = 'error';
-  } finally {
-    if (redisClient) {
-      try {
-        await redisClient.quit();
-      } catch (e) {
-        // Ignore cleanup errors
-      }
-    }
-  }
+  health.redis = await getRedisHealth();
 
   // Check Queue
-  try {
-    const counts = await replyQueue.getJobCounts('waiting', 'active', 'completed', 'failed');
-    health.queue = counts ? 'ok' : 'error';
-    health.queueStats = counts;
-  } catch (error) {
-    health.queue = 'error';
-  }
+  Object.assign(health, await getQueueHealth());
 
   // Return appropriate status code
   const allHealthy = health.server === 'ok' && 
@@ -77,6 +146,30 @@ const getHealth = async (req, res) => {
     success: true,
     ...health
   });
+};
+
+const getRuntimeMetrics = async (req, res) => {
+  try {
+    const queueHealth = await getQueueHealth();
+
+    res.status(200).json({
+      success: true,
+      role: runtimeRole,
+      runtime: getRuntimeMetricsSnapshot(),
+      queue: {
+        status: queueHealth.queue,
+        workers: queueHealth.queueWorkers ?? 0,
+        stats: queueHealth.queueStats || {},
+      },
+      timestamp: Date.now(),
+    });
+  } catch (error) {
+    logger.error('Failed to get runtime metrics', { error: error.message });
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get runtime metrics'
+    });
+  }
 };
 
 /**
@@ -118,6 +211,9 @@ const getQueueMetrics = async (req, res) => {
 };
 
 module.exports = {
+  getLiveness,
+  getReadiness,
   getHealth,
-  getQueueMetrics
+  getQueueMetrics,
+  getRuntimeMetrics
 };

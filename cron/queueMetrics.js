@@ -6,11 +6,13 @@
 const cron = require('node-cron');
 const { replyQueue } = require('../queues/reply.queue');
 const logger = require('../utils/logger');
+const { withCronLock } = require('../utils/cronLock');
 
 /**
  * Get and log queue metrics
  */
 async function logQueueMetrics() {
+  return withCronLock('queue-metrics', async () => {
   try {
     // Get job counts
     const counts = await replyQueue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed');
@@ -53,6 +55,7 @@ async function logQueueMetrics() {
     logger.error('Failed to log queue metrics', { error: error.message });
     return null;
   }
+  }, { ttlMs: 4 * 60 * 1000 });
 }
 
 // Run every 5 minutes

@@ -2,17 +2,28 @@ const cron = require('node-cron');
 const User = require('../models/User');
 const logger = require('../utils/logger');
 const { queueSubscriptionReminderEmail } = require('../queues/email.queue');
+const { getConfig } = require('../services/configManager');
+const { withCronLock } = require('../utils/cronLock');
 
 const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
-const runSubscriptionReminderCheck = async () => {
+const runSubscriptionReminderCheck = async () => withCronLock('subscription-reminders', async () => {
   try {
     const now = new Date();
     const reminderStart = new Date(now.getTime() + 9 * MS_IN_DAY);
     const reminderEnd = new Date(now.getTime() + 10 * MS_IN_DAY + MS_IN_DAY);
+    const runtimeConfig = getConfig();
+    const eligiblePlans = Object.entries(runtimeConfig.plans || {})
+      .filter(([, planConfig]) => Number(planConfig?.priceINR || 0) > 0)
+      .map(([planId]) => planId);
+
+    if (eligiblePlans.length === 0) {
+      logger.warn('Subscription reminder cron skipped because no paid plans are configured.');
+      return;
+    }
 
     const users = await User.find({
-      plan: { $ne: 'free' },
+      plan: { $in: eligiblePlans },
       subscriptionStatus: 'active',
       subscriptionCurrentPeriodEnd: { $gte: reminderStart, $lt: reminderEnd }
     }).select('name email plan subscriptionCurrentPeriodEnd lastSubscriptionReminderSentAt');
@@ -54,7 +65,7 @@ const runSubscriptionReminderCheck = async () => {
       stack: error.stack
     });
   }
-};
+}, { ttlMs: 60 * 60 * 1000 });
 
 cron.schedule('0 9 * * *', runSubscriptionReminderCheck);
 

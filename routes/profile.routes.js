@@ -8,6 +8,17 @@ const multerS3 = require('multer-s3');
 const path = require('path');
 const fs = require('fs');
 const logger = require('../utils/logger');
+const { Country, State, City } = require('country-state-city');
+
+const countryCache = Country.getAllCountries().map((country) => ({
+  code: country.isoCode,
+  name: country.name,
+  latitude: country.latitude ? Number(country.latitude) : null,
+  longitude: country.longitude ? Number(country.longitude) : null,
+}));
+
+const stateCache = new Map();
+const cityCache = new Map();
 
 // Initialize S3 Client
 const s3 = new S3Client({
@@ -309,6 +320,69 @@ const completeOnboarding = async (req, res) => {
   }
 };
 
+const getCountries = async (req, res) => {
+  return res.status(200).json({
+    success: true,
+    countries: countryCache,
+  });
+};
+
+const getStates = async (req, res) => {
+  const countryCode = String(req.query.countryCode || '').toUpperCase().trim();
+
+  if (!countryCode) {
+    return res.status(400).json({
+      success: false,
+      error: 'countryCode is required',
+    });
+  }
+
+  if (!stateCache.has(countryCode)) {
+    stateCache.set(
+      countryCode,
+      State.getStatesOfCountry(countryCode).map((state) => ({
+        code: state.isoCode,
+        name: state.name,
+        countryCode: state.countryCode,
+      }))
+    );
+  }
+
+  return res.status(200).json({
+    success: true,
+    states: stateCache.get(countryCode) || [],
+  });
+};
+
+const getCities = async (req, res) => {
+  const countryCode = String(req.query.countryCode || '').toUpperCase().trim();
+  const stateCode = String(req.query.stateCode || '').toUpperCase().trim();
+
+  if (!countryCode || !stateCode) {
+    return res.status(400).json({
+      success: false,
+      error: 'countryCode and stateCode are required',
+    });
+  }
+
+  const cacheKey = `${countryCode}:${stateCode}`;
+  if (!cityCache.has(cacheKey)) {
+    cityCache.set(
+      cacheKey,
+      City.getCitiesOfState(countryCode, stateCode).map((city) => ({
+        name: city.name,
+        countryCode,
+        stateCode,
+      }))
+    );
+  }
+
+  return res.status(200).json({
+    success: true,
+    cities: cityCache.get(cacheKey) || [],
+  });
+};
+
 /**
  * Delete User Avatar from S3
  */
@@ -361,6 +435,9 @@ router.use(authenticate);
 router.get('/', getProfile);
 router.post('/', saveProfile);
 router.delete('/', deleteProfile);
+router.get('/locations/countries', getCountries);
+router.get('/locations/states', getStates);
+router.get('/locations/cities', getCities);
 router.post('/avatar', upload.single('avatar'), uploadAvatar);
 router.delete('/avatar', deleteAvatar);
 router.post('/complete-onboarding', completeOnboarding);

@@ -4,46 +4,53 @@
  */
 
 const { Queue } = require('bullmq');
-const IORedis = require('ioredis');
-const config = require('../config/config');
 const logger = require('../utils/logger');
 
 const createRedisConnection = require('../config/redis');
+const isTest = process.env.NODE_ENV === 'test';
 
-// Get the cleaned, standardized Redis connection
-const connection = createRedisConnection();
-
-connection.on('error', (err) => {
-  logger.error('Redis connection error in email queue', { error: err.message });
+const createMockEmailQueue = () => ({
+  add: async (name, data) => ({
+    id: `mock-${Date.now()}`,
+    name,
+    data,
+  }),
+  getJobCounts: async () => ({
+    waiting: 0,
+    active: 0,
+    completed: 0,
+    failed: 0,
+  }),
 });
 
-// Create the email queue
-const emailQueue = new Queue('email', {
-  connection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 5000 // 5 seconds initial delay
-    },
-    removeOnComplete: true,
-    removeOnFail: 100, // Keep last 100 failed jobs for debugging
-    timeout: 30000 // 30 second timeout
-  }
-});
+const emailQueue = isTest
+  ? createMockEmailQueue()
+  : (() => {
+      const connection = createRedisConnection();
+
+      connection.on('error', (err) => {
+        logger.error('Redis connection error in email queue', { error: err.message });
+      });
+
+      return new Queue('email', {
+        connection,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: {
+            type: 'exponential',
+            delay: 5000 // 5 seconds initial delay
+          },
+          removeOnComplete: true,
+          removeOnFail: 100, // Keep last 100 failed jobs for debugging
+          timeout: 30000 // 30 second timeout
+        }
+      });
+    })();
 
 /**
  * Add an email job to the queue
  */
 async function queueEmail(type, data) {
-    const metrics = {
-      waiting: await emailQueue.getWaitingCount(),
-      active: await emailQueue.getActiveCount(),
-      failed: await emailQueue.getFailedCount(),
-      delayed: await emailQueue.getDelayedCount()
-    };
-    
-    logger.info('Email queue metrics', metrics);
   const job = await emailQueue.add(type, {
     ...data,
     queuedAt: new Date().toISOString()

@@ -5,7 +5,16 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "start:api": "node server.js",
+    "start:workers": "node workers/index.js",
+    "start:cron": "node cron/index.js",
+    "check": "node scripts/ci-smoke.js",
+    "test": "node --test --test-force-exit test/**/*.test.js",
+    "smoke:deployed": "node scripts/deployed-smoke.js",
+    "backup:mongo": "node scripts/backup-mongo.js",
+    "restore:mongo": "node scripts/restore-mongo.js",
+    "ops:doctor": "node scripts/ops-doctor.js"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.913.0",
@@ -17,6 +26,7 @@
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.71.0",
     "cors": "^2.8.5",
+    "country-state-city": "^3.2.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
@@ -35,5 +45,8 @@
     "stripe": "^14.10.0",
     "ua-parser-js": "^2.0.9",
     "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2"
   }
 }

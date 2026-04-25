@@ -27,6 +27,16 @@ const razorpayWebhookEventSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    status: {
+      type: String,
+      enum: ['processing', 'processed', 'failed'],
+      default: 'processing',
+      index: true,
+    },
+    lastError: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,

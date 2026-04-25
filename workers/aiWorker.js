@@ -8,6 +8,7 @@ const { queueReplyGeneration } = require('../queues/reply.queue');
 const { storeReplyTemplate } = require('../services/replyReuse.service');
 const logger = require('../utils/logger');
 const createRedisConnection = require('../config/redis');
+const { startBullWorker } = require('./utils/startBullWorker');
 
 let aiWorker = null;
 
@@ -15,15 +16,8 @@ const connection = createRedisConnection();
 
 connection.on('error', () => {});
 
-connection.on('ready', () => {
-  logger.info('[AIWorker] Redis connected, starting AI worker');
-});
-
-const isRedisReachable = () => connection.status === 'ready';
-
-setTimeout(() => {
-  if (!isRedisReachable()) {
-    logger.warn('[AIWorker] Redis not available, AI worker disabled');
+const startAiWorker = () => {
+  if (aiWorker) {
     return;
   }
 
@@ -42,9 +36,16 @@ setTimeout(() => {
   aiWorker.on('completed', (job) => logger.logAI('Job completed', { jobId: job.id }));
   aiWorker.on('failed', (job, err) => logger.error('Job failed', { jobId: job?.id, error: err.message }));
   aiWorker.on('error', (error) => logger.error('Worker error', { error: error.message }));
-
   logger.info('[AIWorker] AI worker started', { concurrency: 3 });
-}, 3000);
+
+  return aiWorker;
+};
+
+startBullWorker({
+  label: 'AIWorker',
+  connection,
+  createWorker: startAiWorker,
+});
 
 async function processReplyJob(job) {
   const {
