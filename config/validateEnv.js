@@ -49,6 +49,12 @@ const validateEnvironment = ({ role = 'api' } = {}) => {
       errors.push('REDIS_URL or REDIS_HOST is required in production');
     }
 
+    if (process.env.TURNSTILE_ENABLED === 'true') {
+      assertPresent('TURNSTILE_SECRET_KEY', errors);
+    } else if (!process.env.TURNSTILE_SECRET_KEY) {
+      warnings.push('TURNSTILE_SECRET_KEY is not set. Public auth forms will rely on rate limits and Cloudflare WAF only.');
+    }
+
     if (role === 'workers' || role === 'cron') {
       if (!process.env.REDIS_URL && !process.env.REDIS_HOST) {
         errors.push(`${role} role requires Redis connectivity`);
