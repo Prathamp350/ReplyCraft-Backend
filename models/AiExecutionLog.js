@@ -9,7 +9,7 @@ const aiExecutionLogSchema = new mongoose.Schema(
     },
     provider: {
       type: String,
-      enum: ['google', 'bedrock'],
+      enum: ['google', 'bedrock', 'nvidia'],
       required: true,
       index: true,
     },

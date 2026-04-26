@@ -135,8 +135,19 @@ const aiLimiter = makeLimiter({
   keyGenerator: (req) => req.user?._id?.toString() || req.userId || req.headers['cf-connecting-ip'] || req.ip
 });
 
+// Public support assistant: intentionally strict because it can spend AI tokens.
+const publicSupportAiLimiter = makeLimiter({
+  windowMs: 10 * 60 * 1000,
+  limit: 6,
+  prefix: 'rl:public-support-ai:',
+  message: 'Too many support assistant requests. Please wait a few minutes or create a support ticket.',
+  logLabel: 'Public support assistant rate limit exceeded',
+  keyGenerator: (req) => req.headers['cf-connecting-ip'] || req.ip
+});
+
 module.exports = {
   generalLimiter,
   authLimiter,
-  aiLimiter
+  aiLimiter,
+  publicSupportAiLimiter
 };
